@@ -1,0 +1,89 @@
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @PACKAGE_REVISION@
+
+Summary: Media processing library
+License: Pingtel Commercial License
+Group: Development/Libraries
+Vendor: Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url: http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: openssl-devel >= 0.9.7a
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: sipxportlib-devel >= %version
+BuildRequires: sipxtacklib-devel >= %version
+
+Source: %name-%version.tar.gz
+
+Requires: sipxtacklib >= %version
+
+Prefix: %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+ The sipXmediaLib includes all of the audio processing used in the
+sipXphone and sipXvxml projects. For example, the library contains
+audio bridges, audio splitters, echo supression, tone generation
+(e.g. DTMF), streaming support, RTCP, G711 codecs, etc.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+# Install header files
+%package devel
+Requires: %name
+Group: Development/Libraries
+Vendor: SIPfoundry
+Summary: Header files for %name
+
+%description devel
+ The sipXmediaLib includes all of the audio processing used in the
+sipXphone and sipXvxml projects. For example, the library contains
+audio bridges, audio splitters, echo supression, tone generation
+(e.g. DTMF), streaming support, RTCP, G711 codecs, etc.
+
+This package contains the neccessary header files and static libraries
+helpful to build projects from the sipX library
+
+%prep
+%setup -q
+# suse and obs build system
+mv %{_builddir}/%name-%version/%name-rpmlintrc %{_sourcedir}
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+
+# makeinstall RPM macro doesn't leverage DESTDIR but instead overrides
+# libdir, bindir, etc just for make install. This not copesetic w/how
+# our makefiles are built, they'd rather preserve libdir, and use
+# DESTDIR when copying/moving/creating files.  The approach we're taking
+# is quite standard, so it's surprising RPM's makeinstall macro is
+# the way it is.
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%doc  README   ChangeLog %name.configlog
+%attr(755,root,root) %{_libdir}/libsipXmedia.la
+%attr(755,root,root) %{_libdir}/libsipXmedia.so*
+
+%files devel
+%defattr(644,root,root,755)
+%{_libdir}/libsipXmedia.a
+%dir %attr(755,root,root) %{_includedir}/mp
+%dir %attr(755,root,root) %{_includedir}/rtcp
+%{_includedir}/mp/*
+%{_includedir}/rtcp/*

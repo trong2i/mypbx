@@ -1,0 +1,247 @@
+<%
+  def dports(rule)
+    s = "--dport #{rule[:port]}"
+    unless rule[:end_port].nil?
+      s += ':' + rule[:end_port].to_s
+    end
+    s
+  end
+
+  def sports(rule)
+    s = "--sport #{rule[:port]}"
+    unless rule[:end_port].nil?
+      s += ':' + rule[:end_port].to_s
+    end
+    s
+  end
+
+  def srciprange(rule)
+    s = "-s #{rule[:startIp]}"
+    unless rule[:endIp].nil?
+      s = "-m iprange --src-range #{rule[:startIp]}-#{rule[:endIp]}"
+    end
+    s
+  end
+
+  def limitdrop(loglimit, loginterval)
+    s = ""
+    if loglimit > 0
+      s += "-m limit --limit " + loglimit.to_s + "/" + loginterval.to_s + " "
+    end
+    s
+  end
+
+  def state(protocol)
+    s = "--state NEW"
+    if protocol != "udp"
+      s += ',ESTABLISHED'
+    end
+    s
+  end
+%>*filter
+<%
+  if restrictive
+%>
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [60:6096]
+<%
+  else
+%>
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+<%
+  end
+%>
+
+:syn-flood - [0:0]
+:LOGDROP - [0:0]
+:SIPDOS - [0:0]
+:LOGLIMIT - [0:0]
+<%
+  if logdropped
+%>-A LOGDROP -j LOG <%= limitdrop(loglimit, loginterval) %>--log-level 6 --log-prefix "firewall-drop: "
+<%
+  end
+%>-A LOGDROP -j DROP
+<%
+  if logdos
+%>-A SIPDOS -j LOG <%= limitdrop(loglimit, loginterval) %>--log-level 6 --log-prefix "firewall-sipdos: "
+<%
+  end
+%>-A SIPDOS -j DROP
+<%
+  if lograte
+%>-A LOGLIMIT -j LOG <%= limitdrop(loglimit, loginterval) %>--log-level 6 --log-prefix "firewall-ratedrop: "
+<%
+  end
+
+  if restrictive
+    unless chains.nil?
+      chains.each { |chain|
+%>-N <%= chain[:name] %>
+<%
+        chain[:ipv4s].each { |ipv4|
+%>-A <%= chain[:name] %> -s <%= ipv4 %> -j ACCEPT
+<%
+        }
+%>-A <%= chain[:name] %> -j LOGDROP
+<%
+      }
+    end
+  end
+
+  unless raterules.nil?
+    raterules.each { |raterule|
+%>-N <%= raterule[:rule] %>
+<%
+    }
+  end
+
+  if restrictive
+    cluster.each { |ipv4|
+%>-A INPUT -i $(sipx.iface) -s <%= ipv4 %> -j ACCEPT
+<%
+    }
+  end
+
+  if restrictive
+    unless whitelist.nil?
+      whitelist.each { |whiteipv4|
+%>-A INPUT -i $(sipx.iface) -s <%= whiteipv4 %> -j ACCEPT
+<%
+      }
+    end
+  end
+
+  unless blacklist.nil?
+    blacklist.each { |blackipv4|
+%>-A INPUT -i $(sipx.iface) -s <%= blackipv4 %> -j LOGDROP
+<%
+  }
+  end
+
+  rules.each { |rule|
+    if rule[:sip]
+      unless deniedsip.nil?
+        deniedsip.each { |ua|
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "<%= ua %>" --algo bm -m comment --comment "deny <%= ua %>" -j SIPDOS
+<%
+        }
+      end
+      unless raterules.nil?
+        raterules.each { |raterule|
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> <%= srciprange(raterule) %> -m state --state NEW,ESTABLISHED -j <%= raterule[:rule]%>
+<%
+        }
+      end
+
+      if logregister
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "REGISTER sip:" --algo bm --to 65 -j LOG --log-level 6 --log-prefix "firewall-sip: SIP REGISTER: "
+<%
+      end
+      if loginvite
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "INVITE sip:" --algo bm --to 65 -j LOG --log-level 6 --log-prefix "firewall-sip: SIP INVITE: "
+<%
+      end
+      if logack
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "ACK sip:" --algo bm --to 65 -j LOG --log-level 6 --log-prefix "firewall-sip: SIP ACK: "
+<%
+      end
+      if logoptions
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "OPTIONS sip:" --algo bm --to 65 -j LOG --log-level 6 --log-prefix "firewall-sip: SIP OPTIONS: "
+<%
+      end
+      if logsubscribe
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m string --string "SUBSCRIBE sip:" --algo bm --to 65 -j LOG --log-level 6 --log-prefix "firewall-sip: SIP SUBSCRIBE: "
+<%
+      end
+    end
+    if restrictive
+      if (rule[:protocol] == "tcp_udp")
+%>-A INPUT -i $(sipx.iface) -p tcp <%= dports(rule) %> -m state <%= state("tcp") %> -m comment --comment "<%= rule[:service] %>" -j <%= rule[:chain] %>
+<%
+%>-A INPUT -i $(sipx.iface) -p udp <%= dports(rule) %> -m state <%= state("udp") %> -m comment --comment "<%= rule[:service] %>" -j <%= rule[:chain] %>
+<%      
+      else
+%>-A INPUT -i $(sipx.iface) -p <%= rule[:protocol] %> <%= dports(rule) %> -m state <%= state(rule[:protocol]) %> -m comment --comment "<%= rule[:service] %>" -j <%= rule[:chain] %>
+<%
+      end    
+    end
+  }
+
+  if !restrictive && defined?(filter) && !filter.nil?
+    filter.each { |rule|
+%><%= rule %>
+<%
+    }
+  end
+%>
+<%
+  # Simple things like outgoing DNS queries would not work w/o allowing response traffic back in 
+  if restrictive
+%>
+-A INPUT -i $(sipx.iface) -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -p icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+<%
+  end
+
+  if restrictive
+    unless raterules.nil?
+      raterules.each { |raterule|
+        unless raterule[:limits].nil?
+          raterule[:limits].each{ |limit|
+%>-A <%= raterule[:rule]%> -i $(sipx.iface) -m string --string "<%= limit[:method]%> sip:" --algo bm --to 65 -m hashlimit --hashlimit-mode srcip,srcport --hashlimit-name "<%= limit[:method]%>" --hashlimit-htable-max 10000 --hashlimit-htable-expire 10000 --hashlimit-burst 4 --hashlimit-above <%= limit[:rate]%>/<%= limit[:interval]%> -j DROP
+<%
+          }
+        end
+%>-A <%= raterule[:rule]%> -j LOGLIMIT
+<%
+      }
+    end
+  end
+%>
+<% # log and drop everything else %>
+-A INPUT -j LOGDROP
+COMMIT
+
+*nat
+:PREROUTING ACCEPT [804:106008]
+:POSTROUTING ACCEPT [1376:92796]
+:OUTPUT ACCEPT [1376:92796]
+<%
+  if restrictive && defined?(nat) && !nat.nil?
+    nat.each { |rule|
+%><%= rule %>
+<%
+    }
+  end
+%>
+COMMIT
+
+*mangle
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+<%
+  if restrictive
+    rules.each { |rule|
+      if rule[:priority]
+%>-A OUTPUT -o $(sipx.iface) -p <%= rule[:protocol] %> <%= sports(rule) %> -m comment --comment "<%= rule[:service] %>" -j DSCP --set-dscp-class EF
+<%
+      end
+    }
+
+    if defined? mangle && !mangle.nil?
+      mangle.each { |rule|
+%><%= rule %>
+<%
+      }
+    end
+  end
+%>
+COMMIT

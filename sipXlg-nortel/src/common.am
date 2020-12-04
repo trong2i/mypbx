@@ -1,0 +1,11 @@
+lgnortel_PKGS = \
+	log4j \
+	commons-lang \
+	commons-io \
+	commons-collections \
+	spring-beans \
+	spring-context \
+	spring-core \
+	sipxcommons \
+	sipxconfig-neoconf \
+	velocity

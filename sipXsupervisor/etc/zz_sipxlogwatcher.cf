@@ -1,0 +1,94 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+# SEC - Simple Event Correlator to filter log file entries
+# Named zz_sipxlogwatcher so it gets run after all other promises have
+# setup their logwatcher *.sec files and toggled reload_logwatcher class
+
+bundle agent zz_sipxlogwatcher {
+  methods:
+    sipxlogwatcher::      
+      "any" usebundle => "sipxlogwatcher_config";
+    any::
+      "any" usebundle => "sipxlogwatcher_running";
+      "any" usebundle => "sipxlogwatcher_setup";
+}
+
+bundle agent sipxlogwatcher_config {
+  # Generate sipxlogwatcher-rc only once
+  files:
+    sipxlogwatcher::
+      "$(sipx.SIPX_CONFDIR)/sipxlogwatcher-rc.tmp"
+        comment => "Config SIPXLOGWATCHER service tmp ",
+        create => "true",
+        perms => m(644),
+        edit_line => sipxlogwatcher_config_contents;
+
+      "$(sipx.SIPX_CONFDIR)/sipxlogwatcher-rc"
+        comment => "Config SIPXLOGWATCHER service",
+        create => "true",
+        perms => m(644),
+        copy_from => local_cp_by_digest("$(sipx.SIPX_CONFDIR)/sipxlogwatcher-rc.tmp"),
+        classes => if_repaired("reload_sipxlogwatcher");        
+}
+
+bundle edit_line sipxlogwatcher_config_contents {
+  insert_lines:
+    any::
+      "SEC_ARGS=\"--log=$(sipx.SIPX_LOGDIR)/sipxlogwatcher.log --debug=$(sipx.logwatcher_debug) --detach --conf=$(sipx.SIPX_CONFDIR)/sipxlogwatcher.d/*.sec --input=/var/log/mongodb/mongodb.log --input=$(sipx.SIPX_LOGDIR)/*-alarms.log --input=$(sipx.SIPX_LOGDIR)/sipxconfig.log --input=$(sipx.SIPX_LOGDIR)/sipxsecurity.log --input=$(sipx.SIPX_LOGDIR)/backup.log --pid=$(sipx.SIPX_RUNDIR)/sipxlogwatcher.pid --quoting\"";
+
+  delete_lines:
+    any::
+      ".*";
+}
+
+bundle agent sipxlogwatcher_setup {
+  methods:
+    !src.sipxlogwatcher::
+      "any" usebundle => rh_chkconfig_status("sipxlogwatcher on");
+    !src.!sipxlogwatcher::
+      "any" usebundle => rh_chkconfig_status("sipxlogwatcher off");
+}
+
+bundle agent sipxlogwatcher_running {
+  vars:
+    any::
+      "service" string => "$(sipx.SIPX_SERVICEDIR)/sipxlogwatcher";
+      "service_command" string => "/usr/bin/perl\s+-w\s+/usr/bin/sec";
+
+  methods:
+    any::
+      "any" usebundle => find_service_by_command("$(service_command)", "sipxlogwatcher_running", "root");
+
+  commands:
+    (!sipxlogwatcher|stop_sipxecs).sipxlogwatcher_running::
+      "$(service)"
+        comment => "stop sipxlogwatcher",
+        args => "stop";
+
+    sipxlogwatcher.!sipxlogwatcher_running.!stop_sipxecs::
+      "$(service)"
+        comment => "start sipxlogwatcher",
+        args => "start";
+
+    sipxlogwatcher.sipxlogwatcher_running.reload_sipxlogwatcher.!stop_sipxecs::
+      "$(service)"
+        comment => "reload sipxlogwatcher",
+        args => "reload";
+
+    sipxlogwatcher.sipxlogwatcher_running.(restart_sipxlogwatcher|restart_sipxecs)::
+      "$(service)"
+        comment => "restart sipxlogwatcher",
+        args => "restart";
+}
+

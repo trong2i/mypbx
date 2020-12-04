@@ -1,0 +1,91 @@
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @PACKAGE_REVISION@
+
+Summary: OS Abstraction and OS Utilities library for sipX modules
+License: Pingtel Commercial License
+Group: Development/Libraries
+Vendor: Pingtel Corp
+Packager: Pingtel <support@pingtel.com>
+Url: http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: openssl-devel >= 0.9.7a
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: sipxmedialib-devel >= %version
+BuildRequires: sipxtacklib-devel  >= %version
+BuildRequires: sipxportlib-devel  >= %version
+
+Requires: openssl >= 0.9.7a
+Requires: pcre >= 4.5
+
+Requires: sipxmedialib >= %version
+Requires: sipxtacklib >= %version
+Requires: sipxportlib >= %version
+
+Source: %name-%version.tar.gz
+
+Prefix: %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+ This library provides a set of adapters for using a media subsystem. Three
+adapters currently have been implemented. They are for Pintel media processing,
+GIPS VoiceEngine, and GIPS ConferenceEngine. The applications must select an
+appropriate library during the link time in order to use the right media
+subsystem.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+# Install header files
+%package devel
+Requires: openssl-devel >= 0.9.7a
+Requires: %name
+Group: Development/Libraries
+Vendor: SIPfoundry
+Summary: Header files for %name
+
+Requires: sipxmedialib >= %version
+Requires: sipxtacklib >= %version
+Requires: sipxportlib >= %version
+
+%description devel
+ This library provides a set of adapters for using a media subsystem. Three
+adapters currently have been implemented. They are for Pintel media processing,
+GIPS VoiceEngine, and GIPS ConferenceEngine. The applications must select an
+appropriate library during the link time in order to use the right media
+subsystem.
+
+%prep
+%setup -q
+# suse and obs build system
+mv %{_builddir}/%name-%version/%name-rpmlintrc %{_sourcedir}
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags} all
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%doc  README   ChangeLog %name.configlog
+%attr(755,root,root) %{_libdir}/libsipXmediaProcessing.la
+%attr(755,root,root) %{_libdir}/libsipXmediaProcessing.so*
+
+%files devel
+%defattr(644,root,root,755)
+%doc  README   ChangeLog %name.configlog
+%{_libdir}/libsipXmediaProcessing.a
+%dir %attr(755,root,root) %{_includedir}/mi
+%{_includedir}/mi/*.h

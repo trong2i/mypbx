@@ -1,0 +1,17 @@
+cmcprov_PKGS = \
+	log4j \
+	commons-lang \
+	commons-io \
+	commons-logging \
+	javax.servlet-api \
+	commons-collections \
+	spring-security-config \
+	spring-security-core \
+	spring-beans \
+	spring-web \
+	spring-context \
+	spring-core \
+	sipxcommons \
+	sipxconfig-neoconf \
+	velocity \
+	dom4j

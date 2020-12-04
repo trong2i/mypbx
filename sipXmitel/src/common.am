@@ -1,0 +1,11 @@
+mitel_PKGS = \
+	log4j \
+	commons-lang \
+	commons-io \
+	commons-collections \
+	spring-beans \
+	spring-core \
+	spring-context \
+	sipxcommons \
+	sipxconfig-neoconf \
+	velocity

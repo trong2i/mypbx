@@ -1,0 +1,38 @@
+cfg_PKGS = \
+	sipxconfig-neoconf \
+	sipxcommons \
+	velocity \
+	commons-lang \
+	commons-io \
+	dom4j \
+	spring-beans \
+	spring-core \
+	org.springframework.transaction \
+	xercesImpl \
+	sipxconfig-neoconf \
+	sipxconfig-web \
+	tapestry-annotations \
+	tapestry-framework \
+	hivemind
+
+recording_PKGS = \
+	sipxcommons \
+	log4j \
+	slf4j-api \
+	slf4j-log4j12 \
+	commons-io \
+	commons-codec \
+	commons-httpclient \
+	commons-logging \
+	javax.servlet \
+	mongo \
+	spring-data-mongodb \
+	spring-data-commons \
+	spring-core \
+	spring-beans \
+	spring-context \
+	org.springframework.transaction \
+	spring-expression \
+	commons-lang \
+	jetty \
+	hazelcast-all

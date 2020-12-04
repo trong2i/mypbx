@@ -1,0 +1,9 @@
+{
+  "region" : null,
+  "host" : "swift",
+  "status" : [ "MISSING" ],
+  "available" : [ "RESTART" ],
+  "local" : true,
+  "required" : [ "ADD" ],
+  "voting" : true
+}

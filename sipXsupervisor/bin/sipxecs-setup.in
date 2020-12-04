@@ -1,0 +1,667 @@
+#!/usr/bin/ruby
+
+require 'optparse'
+require 'fileutils'
+require 'socket'
+require 'tempfile'
+
+# using only @VAR@ style vars in this section only helps make this maintainable when integrating
+# patches.
+$cfdatadir = "@SIPX_CFDATA@"
+$confdir = "@SIPX_CONFDIR@"
+$logdir = "@SIPX_LOGDIR@"
+$bindir = "@SIPX_BINDIR@"
+$servicedir = "@SIPX_SERVICEDIR@"
+$user = "@SIPXPBXUSER@"
+$group = "@SIPXPBXGROUP@"
+
+$domain_dat = "#{$cfdatadir}/domain.cfdat"
+$domain_part = "#{$cfdatadir}/domain-config.part"
+$root_cfenginedir = "/var/cfengine"
+$home_dir = `awk -F : '/^#{$user}:/ { print $6 }' /etc/passwd`.chomp
+$user_keydir = "#{$home_dir}/.cfagent/ppkeys"
+$primary_dat = "#{$cfdatadir}/defaults/primary.cfdat"
+$secondary_dat = "#{$cfdatadir}/defaults/secondary.cfdat"
+$master_dat= "#{$cfdatadir}/defaults/master"
+$location_dat = "#{$cfdatadir}/defaults/location_id"
+$mongo_client_ini = "#{$cfdatadir}/1/mongo-client.ini"
+$log = "#{$logdir}/sipxagent.log"
+$verbose = false
+$advanced = false
+$exit_status = 0
+$prompt = {:primary => true}
+
+def run_command(cmd)
+  puts cmd if $verbose
+  ok = system("#{cmd} #{' >/dev/null' unless $verbose}")
+  if (!ok)
+    puts
+    puts  "Failure to run command #{cmd}. See #{$log} for details. After you"
+    puts  "have addressed the issue, you may rerun this script."
+    puts
+  end
+  return ok
+end
+
+def set_root_keys
+  #harmless if re-run  
+  exit 1 unless run_command "/usr/sbin/cf-key"
+end
+
+def set_nonroot_keys
+  #harmless if re-run
+  exit 1 unless run_command "su - #{$user} sh -c '/usr/sbin/cf-key'"
+end
+
+def set_secondary_role
+  return true if File.exists?($secondary_dat)
+  puts "Configuring as an additional server..."
+
+  master_address = prompt_required("Enter ip address or fully qualified host name of the primary server : ", :master_address)
+
+  location_id = prompt_required("Enter the numeric id assigned to this server by the administration server : ", :location_id)
+  File.open($location_dat,'w') {|f|
+    f.puts location_id
+  }
+  location_dir = "#{$cfdatadir}/#{location_id}"
+  Dir.mkdir(location_dir) unless File.directory?(location_dir)  
+  
+  master_cfdata = "#{$cfdatadir}"
+  master_confdir = "#{$confdir}"
+  if $advanced
+    master_cfdata = prompt_default("Enter SIPX_CFDATA directory on master", master_cfdata, :cfdata_dir)
+    master_confdir = prompt_default("Enter SIPX_CONFDIR directory on master", master_confdir, :conf_dir)
+  end
+  File.open($master_dat,'w') {|f|
+    f.puts "address=#{master_address}"
+    f.puts "SIPX_CFDATA=#{master_cfdata}"
+    f.puts "SIPX_CONFDIR=#{master_confdir}"
+  }
+  File.open($secondary_dat,'w') {|f|
+    f.puts "+sipxsupervisor"
+  }
+
+  return true
+end
+
+# Return true or false IF machine is primary, not is anything was done or not
+def choose_primary_role?
+  if $prompt[:noui]
+    unless $prompt[:primary] 
+      rm_file $primary_dat
+      return
+    end
+  else
+    return unless prompt_confirm("Is this the \e[0;31mfirst server\e[m in your cluster?")
+  end
+  puts "Configuring as the first server..."
+  File.open($location_dat, 'w') {|f|
+    f.puts('1')
+  }
+  puts "Created #{$location_dat}" if $verbose
+  File.open($primary_dat, 'w') {|f|
+    f.puts <<EOF
++primary
++sipxsupervisor
++postgres
++mongod
++apache
+EOF
+  }
+  puts "Created #{$primary_dat}" if $verbose
+end
+
+def prompt_confirm(msg)
+  return prompt(msg + " [ enter 'y' or 'n' ] : ", "Invalid response. Please use 'y' or 'n'.") {|v|
+    case v.downcase
+    when 'y'
+      true
+    when 'n' 
+      false
+    else 
+      nil
+    end
+  }
+end
+
+def prompt(msg, err_msg = "Invalid answer")
+  while true
+    print msg
+    value = readline.chomp
+    answer = yield(value)
+    return answer unless answer.nil?
+    puts err_msg
+  end
+end
+
+def prompt_default(msg, system_default, prompt_parameter)
+  prompt_default = $prompt[prompt_parameter]
+  default = prompt_default.nil? ? system_default : prompt_default
+  if $prompt[:noui]
+    raise "Missing parameter #{prompt_parameter}" if default.nil?
+    return default
+  end
+  prompt(msg << (default.empty? ? ' : ' : " [ press enter for '\e[0;31m#{default}\e[m' ] : ")) {|v|
+    s = v.empty? ? default : v
+    s.empty? ? nil : s
+  }
+end
+
+def prompt_required(msg, prompt_parameter)
+  if $prompt[:noui]
+    v = $prompt[prompt_parameter]
+    raise("Missing required parameter #{prompt_parameter}") if v.nil?
+    return v
+  end
+  return prompt(msg, "You must specify a value") {|v|
+    v.empty? ? nil : v
+  }
+end
+
+# PRIMARY ONLY
+def set_sip_domain
+  net = get_network
+  puts <<EOF
+\e[0;31mTip:\e[m Use '\e[0;31m#{net.host}.#{net.domain}\e[m' as your SIP domain if you are 
+setting up for the first time or if you know you are only going to setup one
+server. This can make configuration easier.  You can always change the value
+later.
+EOF
+  sip_domain = prompt_default("Enter \e[0;31mSIP domain\e[m name", net.domain, :sip_domain)
+  realm = prompt_default("Enter \e[0;31mSIP realm\e[m", sip_domain, :sip_realm)
+  # shared secret is not really used anymore, but some servers still read it
+  shared_secret = `head -c 18 /dev/urandom | base64`.chomp
+  File.open($domain_dat, 'w') { |f|
+    f.puts <<EOF
+=domain=#{sip_domain}
+=realm=#{realm}
+=secret=#{shared_secret}
+=lang=en
+EOF
+  }
+
+  puts "Created #{$domain_dat}" if $verbose
+  FileUtils.chown($user, $group, $domain_dat)
+end
+
+def rm_files(d)
+  puts "clearing files in directory #{d}" if $verbose
+  return unless File.directory? d
+  Dir.foreach(d) { |f|
+    next if f == '.' or f == '..'
+    fname = "#{d}/#{f}"
+    if File.file?(fname)
+      rm_file(fname) 
+    elsif File.directory?(fname)
+      rm_files(fname)
+      Dir.rmdir(fname)
+    end
+  }
+end
+
+def rm_file(f)
+  puts "Checking if #{f} exists" if $verbose
+  return unless File.exists?(f)
+  puts "Removing #{f}" if $verbose
+  File.unlink(f)
+end
+
+def reset
+  rm_file($domain_dat)
+  rm_file($domain_part)
+  rm_file($primary_dat)
+  rm_file($secondary_dat)
+  rm_file($master_dat)
+  rm_file($location_dat)
+  rm_file($mongo_client_ini)
+end
+
+def reset_all
+  return false unless $prompt[:noui] || prompt_confirm("This will \e[0;31mwipe all\e[m configuration data from this server. Are you sure?")
+
+  # may not work, but try to shut down whatever is running
+  cmd_no_die("#{$bindir}/sipxagent -d stop_sipxecs")
+  cmd_no_die("#{$serviceder}/sipxsupervisor stop")
+
+  # cannot rely stop_sipxecs worked all the way
+  cmd_no_die("killall -9 java")
+
+  Dir.foreach($cfdatadir) { |f|
+    next if f == '.' or f == '..'
+    fname = "#{$cfdatadir}/#{f}"
+    if File.directory?(fname)
+      next if f == 'defaults'
+      rm_files fname
+    else
+      rm_file fname
+    end
+  }
+  reset
+  cfe = ["#{$root_cfenginedir}/ppkeys/*", "#{$root_cfenginedir}/state/*", "#{$root_cfenginedir}/*.tcdb" ]
+  Dir.glob(cfe).each {|f|
+    rm_file(f)
+  }
+  rm_files("#{$home_dir}/.cfagent")
+
+  # Flush out any existing connections, otherwise we cannot drop databases
+  # test if postgres is supposed to be running on the machine
+  has_postgres_data = File.directory? "/var/lib/pgsql/data/base"
+  if has_postgres_data
+    cmd_no_die("/etc/init.d/postgresql restart")
+  end
+
+  # references to project specific data, but we cannot rely that system is
+  # in a state that cfengine can run reliably so we must delete straight away
+  if has_postgres_data
+    drop_db_if_exists('SIPXCONFIG')
+    drop_db_if_exists('SIPXCDR')
+    drop_db_if_exists('openfire')
+  end
+  cmd_no_die("#{$bindir}/mongodb-admin --obliterate")
+end
+
+def drop_db_if_exists(db)
+  # backtick eats errors by default
+  cmd_no_die "dropdb -U postgres #{db}"
+end
+
+def cmd_no_die(cmd)
+  s = `#{cmd} 2>&1`
+  puts s if $verbose
+end
+
+def network_settings
+  change = false
+  while true
+    net = get_network(true)
+    puts "\e[0;31mNetwork settings:\e[m"
+    puts "IP address   : #{net.ip}"
+    reprompt = prompt_confirm("Would you like to configure your system\'s \e[0;31m network settings\e[m?") unless $prompt[:noui]
+    if reprompt
+      change = true
+      system("/usr/sbin/system-config-network-tui")
+      system("/etc/init.d/network reload")
+    else
+      break
+    end
+  end
+  return change
+end
+
+def set_primary_hostname
+  net = get_network(true)
+  net.host = prompt_default("Enter just the \e[0;31mhost name\e[m of this computer?. Example: myhost.", net.host, :net_host);
+  net.domain = prompt_default("Enter just the \e[0;31mdomain name\e[m of your network? Example: mydomain.com", net.domain, :net_domain)
+
+  File.open("#{$cfdatadir}/network.cfdat", 'w') { |f|
+    f.puts <<EOF
+=net_domain=#{net.domain}
+EOF
+  }
+
+  location_dir = "#{$cfdatadir}/1"
+  Dir.mkdir(location_dir) unless File.directory?(location_dir)
+  host_dat = "#{location_dir}/host.cfdat"
+  File.open(host_dat, 'w') { |f|
+    f.puts <<EOF
+=host=#{net.host}
+EOF
+  }  
+  FileUtils.chown_R($user, $group, location_dir)
+end
+
+def is_primary?
+  return File.exists?($primary_dat)
+end
+
+def is_secondary?
+  return File.exists?($secondary_dat)
+end
+
+def get_location_id
+  return nil unless File.exists?($location_dat)
+  File.open($location_dat, 'r') {|f|
+    return f.gets.chomp
+  }
+end
+
+def get_network(force = false)
+  return $network if (!force and defined? $network)
+  $network = Network.new
+end
+
+class Network
+  attr_accessor :ip, :host, :domain
+
+  def initialize
+    orig, Socket.do_not_reverse_lookup = Socket.do_not_reverse_lookup, true
+    UDPSocket.open { |s|
+      s.connect '8.8.8.8', 1
+      @ip = s.addr.last
+    }
+
+    # hostname call is not reliable, check hosts file for more accurate answer
+    # the network config tool system-config-network-tui  does not create a clean
+    # /etc/hosts file but we can
+    # glean the results in such a way that if someone did change the host name using
+    # that tool, we can tell what they entered.  The hostname.cf file will clean up the 
+    # /etc/hosts file later.
+
+    domain_from_resolv = nil
+    fqdn_from_network = nil
+    host_from_hostname_s = nil
+    domain_from_hostname_d = nil
+    host_from_hosts = nil
+    fqdn_from_hosts = nil
+
+    File.open('/etc/resolv.conf', 'r') {|f|
+      while (line = f.gets)
+        if line =~ /^search\s*(.*?)$/
+          domain_from_resolv = $1.gsub(/\s+/,'')
+        end
+      end
+    }
+    
+    File.open('/etc/sysconfig/network', 'r') {|f|
+      while (line = f.gets)
+        if line =~ /^HOSTNAME=["']?(.*?)["']?$/
+          fqdn_from_network = $1
+        end
+      end
+    }
+
+    x = `hostname -s 2>/dev/null`.chomp
+    if $? == 0 && ! x.empty?
+      host_from_hostname_s = x
+    end
+
+    x = `hostname -d 2>/dev/null`.chomp
+    if $? == 0 && ! x.empty?
+      domain_from_hostname_d = x
+    end    
+
+    File.open('/etc/hosts', 'r') {|f|
+      while (line = f.gets)
+        segments = line.split
+        if segments.length == 3 and segments[0] == @ip
+          if segments[2].end_with?(segments[1])
+            # user got it backwards, but we can detect this and correct it.
+            # the non-obvious but required format of hosts file for hostname to work
+            #    IP_ADDRESS  fqdn  hostname            
+            fqdn_from_hosts = segments[2]
+            host_from_hosts = segments[1]
+          else
+            fqdn_from_hosts = segments[1]
+            host_from_hosts = segments[2]
+          end
+        end
+      end
+    }
+
+    # now that we've gathered all the possible answers, use the values
+    # in order of most likely to be accurate to least likely to be accurate
+    # from investigation of installations  
+    if domain_from_resolv
+      # most accurate on new systemd when admin configured network
+      @domain = domain_from_resolv
+    elsif fqdn_from_hosts && fqdn_from_hosts.end_with?(host_from_hosts)
+      @domain = fqdn_from_hosts
+      @domain.slice!(host_from_hosts + '.')
+    elsif domain_from_hostname_d
+      @domain = domain_from_hostname_d
+    elsif fqdn_from_network
+      @domain = fqdn_from_network.partition('.')[2]
+    end
+
+    if fqdn_from_network and fqdn_from_network.end_with?(@domain)
+      @host = fqdn_from_network.chomp(".#{@domain}")
+    elsif host_from_hosts and ! host_from_hosts.end_with?(@domain)
+      @host = host_from_hosts
+    elsif host_from_hostname_s
+      @host = host_from_hostname_s
+    elsif fqdn_from_network
+      @host = fqdn_from_network.partition('.')[0]
+    end
+
+
+    if $verbose
+      puts "domain_from_resolv=#{domain_from_resolv}" 
+      puts "fqdn_from_hosts=#{fqdn_from_hosts}"
+      puts "host_from_hosts=#{host_from_hosts}"
+      puts "domain_from_hostname_d=#{domain_from_hostname_d}" 
+      puts "fqdn_from_network=#{fqdn_from_network}" 
+      puts "host_from_hostname_s=#{host_from_hostname_s}" 
+      puts "@domain=#{@domain}" 
+      puts "@host=#{@host}"
+    end
+  end
+
+  def valid?
+    @ip and @host and @domain
+  end
+
+  def fqdn
+    @host + '.' + @domain
+  end
+end
+
+def print_role_settings
+  settings = {}
+  puts "\e[0;31mApplication settings:\e[m"
+  puts "Primary server : " + (is_primary? ? 'yes' : 'no')
+  settings[:location] = get_location_id
+  return nil if settings[:location].empty?
+  puts "Location ID    : #{settings[:location]}" if is_secondary?
+  files = [ 
+    "#{$cfdatadir}/#{settings[:location]}/host.cfdat",
+    $domain_dat,
+    $master_dat, 
+    "#{$cfdatadir}/network.cfdat", 
+  ]
+  files.each {|fname|
+    next unless File.exists?(fname)
+    File.open(fname, "r") {|fstream|
+      while (line = fstream.gets)
+        f = line.chomp.gsub(/^=/,'').split('=')
+        case f[0]
+        when 'domain'
+          settings[:domain] = f[1]
+          puts "SIP Domain     : " + settings[:domain]  if is_primary?
+        when 'net_domain'
+          settings[:net_domain] = f[1]
+          puts "Network Domain : " + settings[:net_domain]  if is_primary?
+        when 'host'
+          settings[:host] = f[1]
+          puts "Host           : " + settings[:host]  if is_primary?
+        when 'address'
+          settings[:master_address] = f[1]
+          puts("Master         : " + settings[:master_address]) if is_secondary?
+        else
+        end  
+      end
+    }
+  }
+  return settings
+end
+
+
+def has_role?
+  return (is_primary? || is_secondary?)
+end
+
+def change_role?
+  change = prompt_confirm("Would you like to \e[0;31mchange\e[m your application settings?") unless $prompt[:noui] 
+  if change
+    rm_file($primary_dat)
+    rm_file($secondary_dat)
+  end
+  change
+end
+
+def choose_role
+  choose_primary_role?
+  if is_primary?
+    set_nonroot_keys()
+    set_primary_hostname
+    set_sip_domain
+  else
+    set_secondary_role
+  end
+end
+
+# Call OEM setup hook function
+def custom_hook
+  custom_script = "#{$confdir}/sipxecs-setuprc"
+  if File.exists?(custom_script) and !$prompt[:noui]
+    if system "/bin/sh #{custom_script}"
+      puts "Continue with application setup ..."
+    else
+      puts "Error executing script"
+      exit 1
+    end
+  end
+end
+
+args = OptionParser.new { |opts|
+  opts.banner = "Usage : sipxecs-setup [options]"
+
+  opts.separator ""
+  opts.separator "Options:"
+
+  opts.on("--verbose", "Send extra details to console.") {
+    $verbose = true
+  }
+
+  opts.on("--reset", "Force reset of normal settings.") {
+    reset
+  }
+
+  opts.on("--reset-all", "Force reset of all possible settings including ssl keys.") {
+    reset_all
+  }
+
+  opts.on("--advanced", "Ask advanced questions.") {
+    $advanced = true
+  }
+
+  opts.on("--noui", "Do not prompt for input from user. Must specify parameters for required answers.") {
+    $prompt[:noui] = true
+  }
+
+  opts.on("--help", "Print options") {
+    puts opts
+    exit
+  }
+
+  $sync_time = true
+  opts.on("--no-sync-time", "Do not attempt to sync local date/time with primary server. Specify this if master server is not running an NTP server.\n\n") {
+    $sync_time = false
+  }
+
+  opts.separator ""
+  opts.separator "**Non-interactive parameters for primary machines:" 
+
+  opts.on("--sip_domain domain", "SIP domain. Default is network domain. Optional for primary setups when using --noui parameter.\n\n") {|v|
+    $prompt[:sip_domain] = v
+  }
+
+  opts.on("--sip_realm realm", "SIP authorization realm. Default is answer for SIP domain. Required for primary setups when using --noui parameter.\n\n") {|v|
+    $prompt[:sip_realm] = v
+  }
+
+  opts.on("--net_domain domain", "Network domain. Default is to using existing network domain. Optional for primary setups when using --noui parameter.\n\n") {|v|
+    $prompt[:net_domain] = v
+  }
+
+  opts.on("--net_host hostname", "Host name without network domain portion. Default is to use existing network domain. Optional for primary setups when using --noui parameter.\n\n") {|v|
+    $prompt[:net_host] = v
+  }
+
+  opts.separator ""
+  opts.separator "**Non-interactive parameters for additional nodes:"
+
+  opts.on("--master_address address", "IP address or Fully qualified host name of master server. Required for additional node setups with using --noui parameter.\n\n") {|v|
+    $prompt[:master_address] = v
+    $prompt[:primary] = false
+  }
+
+  opts.on("--location_id number", "The location id assign in admin UI for this machine. Required for additional node setups when using --noui parameter.\n\n") {|v|
+    $prompt[:location_id] = v
+    $prompt[:primary] = false
+  }
+
+  opts.on("--cfdata_dir dir", "Where the cfdata dir is on master. Default is /var/sipxdata/cfdata. Optional for additional node setups with using --noui parameter.\n\n") { |v|
+    $prompt[:cfdata_dir] = v
+  }
+
+  opts.on("--conf_dir dir", "Where the configuration director is. Default is /etc/sipxpbx. Optional for additional node setups with using --noui parameter.\n\n") { |v|
+    $prompt[:conf_dir] = v
+  }
+}
+args.parse!
+
+raise 'Must run as root' unless Process.uid == 0
+if __FILE__ == $0
+set_root_keys()
+network_settings
+custom_hook
+role_settings = nil
+
+while true
+  choose_role
+  role_settings = print_role_settings
+  if change_role?
+    next unless $prompt[:noui]
+  end
+  break
+end
+
+def ntpd_running?
+ system("/sbin/service ntpd status")
+end
+
+# First pass generated cfdata info
+if is_primary?
+  puts "Initial setup, this may take a few minutes..."
+  exit 1 unless run_command("#{$bindir}/sipxagent #{'-v ' if $verbose} -d setup")
+  puts "Finishing system configuration, almost done..."
+else  
+  if $sync_time
+    unless ntpd_running?
+      tmp_ntp = nil
+      puts "Synchronizing clocks with master server first..."
+      Tempfile.open('sipxecs-setup.ntp') {|f|
+        tmp_ntp = f.path
+        f.puts <<EOF
+driftfile /var/lib/ntp/drift
+server #{role_settings[:master_address]} iburst
+EOF
+      }
+      run_command("/usr/sbin/ntpd -gnq#{'d' if $verbose} -c #{tmp_ntp}")
+    end
+  end
+  puts "Configuring system, this may take a few minutes..."
+end
+
+# 2nd pass operates on cfdata info
+ok = run_command("#{$bindir}/sipxagent #{'-v ' if $verbose}")
+
+if !ok
+  puts "failed."
+  exit 1
+else
+  puts "done."
+  net = get_network
+  if is_primary?
+    puts <<EOL
+\n
+In a few more minutes you will be able to access the administration
+interface from your web browser at the following URL:
+
+  https://#{net.fqdn}
+
+EOL
+  end
+  exit 0
+end
+end

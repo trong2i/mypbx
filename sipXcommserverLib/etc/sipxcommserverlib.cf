@@ -1,0 +1,136 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+#
+# Common configure setup for sipXecs components
+#
+
+bundle agent sipxcommserverlib {
+  methods:
+    any::
+      # run snmpd watchdog first so if this is a stop request, 
+      # it doesn't start things up on shutdown.
+      "any" usebundle => "snmp";
+
+      "any" usebundle => "sipxcommserverlib_config";
+}
+
+bundle agent sipxcommserverlib_config {
+  vars:
+    "ssl" slist => {
+      "ssl.key",
+      "ssl.crt"
+    };
+
+  files:
+    any::
+      "$(sipx.SIPX_CONFDIR)/ssl/$(ssl)"
+        comment => "install SSL SIP info $(this.promiser)",
+        create => "true",
+        copy_from => copy_from_cfdata("$(ssl)"),
+        perms => mog("600","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)"),
+        classes => if_repaired("ssl_repaired");
+
+      "$(sipx.SIPX_CONFDIR)/ssl/ssl.keystore"
+        comment => "install Java SSL info $(this.promiser)",
+        create => "true",
+        copy_from => copy_from_cfdata("ssl.keystore"),
+        perms => mog("600","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)"),
+        classes => if_repaired("java_ssl_repaired");
+
+      "$(sipx.SIPX_CONFDIR)/ssl/ssl-web.keystore"
+        comment => "install Java SSL info $(this.promiser)",
+        create => "true",
+        copy_from => copy_from_cfdata("ssl-web.keystore"),
+        perms => mog("600","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)"),
+        classes => if_repaired("java_ssl_web_repaired");
+
+      "$(sipx.SIPX_CONFDIR)/ssl/authorities.jks"
+        comment => "install Java WEB SSL  $(this.promiser)",
+        create => "true",
+        copy_from => copy_from_cfdata("authorities.jks"),
+        perms => mog("600","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)"),
+        classes => if_repaired("java_authorities_repaired");
+
+      "$(sipx.SIPX_CONFDIR)/ssl/authorities/."
+        comment => "install SSL authority dir $(this.promiser)",
+        create => "true",
+        perms => mog("755","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)");
+
+      "$(sipx.SIPX_CONFDIR)/ssl/authorities"
+        comment => "install SSL info $(this.promiser)",
+        create => "true",
+        copy_from => copy_from_cfdata("authorities"),
+        depth_search => recurse("1"),
+        file_select => authority_files,
+        perms => mog("644","$(sipx.SIPXPBXUSER)","$(sipx.SIPXPBXGROUP)"),
+        classes => if_repaired("authorities_repaired");
+      
+    any::
+      "$(sipx.SIPX_CONFDIR)/domain-config"
+        comment => "install domain info $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        edit_line => domain_config,
+        classes => if_repaired("restart_sipxproxy");
+
+        # do not call this, it restarts too much,
+        # need to get DOMAIN_ALIASES out of the config file
+        # classes => if_repaired("restart_sipxecs");
+
+   commands: 
+    authorities_repaired::
+        "$(sipx.SIPX_BINDIR)/sipx-remove-authorities-symlinks.sh"
+        comment => "remove auth crt symlinks";
+    ssl_repaired::
+        "$(sipx.SIPX_BINDIR)/sipx-remove-ssl-symlinks.sh"
+        comment => "remove crt symlinks";
+    any::
+        "$(sipx.SIPX_BINDIR)/sipx-ssl-symlinks.sh"
+        comment => "create crt symlinks";
+}
+
+body file_select authority_files {
+  leaf_name => {
+    ".*\.crt",
+  };
+  file_result => "leaf_name";
+}
+
+
+bundle edit_line domain_config {
+  classes:
+    "part_exists" expression => fileexists("$(sipx.SIPX_CFDATA)/domain-config.part");
+    "fqdn_domain" expression => strcmp("$(sipx.host).$(sipx.net_domain)", "$(sipx.domain)");
+
+  insert_lines:
+    any::
+      "SIP_DOMAIN_NAME : $(sipx.domain)";
+      "SIP_REALM : $(sipx.realm)";
+      "SHARED_SECRET : $(sipx.secret)";
+      "DEFAULT_LANGUAGE : $(sipx.lang)";
+      "SUPERVISOR_PORT : 8092";
+    part_exists::
+      "$(sipx.SIPX_CFDATA)/domain-config.part"
+        insert_type => "file";
+    !part_exists.!fqdn_domain::
+       "SIP_DOMAIN_ALIASES : $(sys.ipv4) $(sipx.host).$(sipx.net_domain)";
+       "CONFIG_HOSTS : $(sipx.host).$(sipx.net_domain)";
+    !part_exists.fqdn_domain::
+       "SIP_DOMAIN_ALIASES : $(sys.ipv4)";
+       "CONFIG_HOSTS : $(sipx.host).$(sipx.net_domain)";
+
+  delete_lines:
+    any::
+      ".*";
+}

@@ -1,0 +1,65 @@
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @PACKAGE_REVISION@
+
+Summary: Automatic phone-provisioning
+License: LGPL
+Group: Productivity/Telephony/SIP/Servers
+Vendor: SIPfoundry
+Packager: SIPfoundry <sipx-dev@sipfoundry.org>
+Url: http://www.sipfoundry.org
+
+BuildRequires: automake
+BuildRequires: java-1.7.0-openjdk-devel
+BuildRequires: zip
+BuildRequires: sipxcommons >= %version
+BuildRequires: sipxopenfire >= %version
+
+Source: %name-%version.tar.gz
+
+Obsoletes: sipxvxml
+
+Requires: sipxcommons >= %version
+Requires: chkconfig
+BuildRequires: sipxconfig >= %version
+
+%if %{?use_ibm_jvm}0
+Requires: java-ibm >= 1.6
+Requires: java-ibm-unrestricted
+%endif
+
+Prefix: %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+Automatic phone-provisioning
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make all
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxprovision
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxprovision.cf
+%dir %attr(775,sipx,sipx) %{_sysconfdir}/sipxpbx/sipxprovision
+%config(noreplace) %{_sysconfdir}/sipxpbx/sipxprovision/*
+%attr(755,sipx,sipx) %{_datadir}/java/sipXecs/sipXprovision
+%{_datadir}/java/sipXecs/sipXprovision/sipXprovision.jar
+%{_datadir}/java/sipXecs/sipXconfig/plugins/provision-cfg-service.jar
+
+%post
+if grep -q :on <<<`/sbin/chkconfig sipxprovision --list 2>&1`; then
+    /sbin/chkconfig sipxprovision reset
+fi

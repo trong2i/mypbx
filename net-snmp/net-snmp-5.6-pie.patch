@@ -1,0 +1,26 @@
+diff --git a/agent/Makefile.in b/agent/Makefile.in
+index 748b01c..9a54d50 100644
+--- a/agent/Makefile.in
++++ b/agent/Makefile.in
+@@ -294,7 +294,7 @@ getmibstat.o: mibgroup/kernel_sunos5.c
+ 	$(CC) $(CFLAGS) -o $@ -D_GETMIBSTAT_TEST -DDODEBUG -c $? 
+ 
+ snmpd$(EXEEXT):	${LAGENTOBJS} $(USELIBS) $(AGENTLIB) $(HELPERLIB) $(MIBLIB) $(LIBTARG) 
+-	$(LINK) $(CFLAGS) -o $@ ${LAGENTOBJS} ${LDFLAGS} ${OUR_AGENT_LIBS}
++	$(LINK) $(CFLAGS) -pie -o $@ ${LAGENTOBJS} ${LDFLAGS} ${OUR_AGENT_LIBS}
+ 
+ libnetsnmpagent.$(LIB_EXTENSION)$(LIB_VERSION):    ${LLIBAGENTOBJS} $(USELIBS)
+ 	$(LIB_LD_CMD) $(AGENTLIB) ${LLIBAGENTOBJS} $(USELIBS) ${LAGENTLIBS} @LD_NO_UNDEFINED@ $(LDFLAGS) $(PERLLDOPTS_FOR_LIBS) $(LIB_LD_LIBS) @AGENTLIBS@
+diff --git a/apps/Makefile.in b/apps/Makefile.in
+index 77404dd..d15e78d 100644
+--- a/apps/Makefile.in
++++ b/apps/Makefile.in
+@@ -170,7 +170,7 @@ snmptest$(EXEEXT):    snmptest.$(OSUFFIX) $(USELIBS)
+ 	$(LINK) ${CFLAGS} -o $@ snmptest.$(OSUFFIX) ${LDFLAGS} ${LIBS}
+ 
+ snmptrapd$(EXEEXT):    $(TRAPD_OBJECTS) $(USETRAPLIBS) $(INSTALLLIBS)
+-	$(LINK) ${CFLAGS} -o $@ $(TRAPD_OBJECTS) $(INSTALLLIBS) ${LDFLAGS} ${TRAPLIBS}
++	$(LINK) ${CFLAGS} -o $@ -pie $(TRAPD_OBJECTS) $(INSTALLLIBS) ${LDFLAGS} ${TRAPLIBS}
+ 
+ snmptrap$(EXEEXT):    snmptrap.$(OSUFFIX) $(USELIBS)
+ 	$(LINK) ${CFLAGS} -o $@ snmptrap.$(OSUFFIX) ${LDFLAGS} ${LIBS}

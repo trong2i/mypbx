@@ -1,0 +1,129 @@
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  SIP Proxy Server
+License:  Pingtel Commercial License
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url:      http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: zeromq-devel
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: unixODBC-devel
+BuildRequires: zip
+%if %{_vendor} == suse
+BuildRequires: pwdutils
+%else
+BuildRequires: shadow-utils
+%endif
+BuildRequires: sipxcommserverlib-devel  >= %version
+BuildRequires: sipxportlib-devel        >= %version
+BuildRequires: sipxtacklib-devel        >= %version
+
+Source:   %name-%version.tar.gz
+
+%if %{_vendor} == suse
+Requires: pwdutils
+Requires: cron
+%else
+Requires: shadow-utils
+%if 0%{?fedora} >= 17 || 0%{?rhel} >= 7
+BuildRequires: cronie
+%else
+BuildRequires: vixie-cron
+%endif
+%endif
+Requires: sipxcommserverlib >= %version
+Requires: sipxrelay >= %version
+Requires: chkconfig
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%define sipxpbxvarlib %{_var}/lib/sipxpbx
+
+%description
+RFC 3261 compliant SIP proxy called sipXproxy:
+The sipXproxy is used in the sipXpbx project. However it may be used
+independently from the PBX as a stand-alone SIP proxy. The sipXregistry
+may also be used with the sipXproxy though it is not necessary. The
+sipXproxy provides service level routing, parallel and serial forking
+and AAA services.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%package devel
+Requires: %name
+Group: Development/Libraries
+Vendor: SIPfoundry
+Summary: Internal documentation for %name
+Requires: sipxcommserverlib-devel >= %version
+
+%description devel
+Internal class documentation for the proxy classes
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%doc  ChangeLog %name.configlog
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxproxy
+%attr(755,root,root) %{_sysconfdir}/sipxpbx/sipxproxy/sipxproxy.sec.erb
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxproxy.cf
+%attr(755,root,root) %{_bindir}/sipXproxy
+%attr(755,root,root) %{_datadir}/sipxecs/schema/forwardingrules.xsd
+%attr(755,root,root) %{_datadir}/sipxecs/schema/nattraversalrules.xsd
+%attr(755,root,root) %{_libdir}/authplugins/libCallDestination.so*
+%attr(755,root,root) %{_libdir}/authplugins/libCallerAlertInfo.so*
+%attr(755,root,root) %{_libdir}/authplugins/libCallerAlias.so*
+%attr(755,root,root) %{_libdir}/authplugins/libEmergencyLineIdentifier.so*
+%attr(755,root,root) %{_libdir}/authplugins/libEnforceAuthRules.so*
+%attr(755,root,root) %{_libdir}/authplugins/libMSFT_ExchangeTransferHack.so*
+%attr(755,root,root) %{_libdir}/authplugins/libNatTraversalAgent.so*
+%attr(755,root,root) %{_libdir}/authplugins/libRequestLinter.so*
+%attr(755,root,root) %{_libdir}/authplugins/libSubscriptionAuth.so*
+%attr(755,root,root) %{_libdir}/authplugins/libTransferControl.so*
+%attr(755,root,root) %{_libdir}/libsipXproxy.so*
+%attr(755,root,root) %{_libdir}/transactionplugins/libGatewayDestPlugin.so*
+
+%files devel
+%defattr(644,root,root,755)
+%{_libdir}/authplugins/libCallDestination.la
+%{_libdir}/authplugins/libCallerAlertInfo.la
+%{_libdir}/authplugins/libCallerAlias.la
+%{_libdir}/authplugins/libEmergencyLineIdentifier.la
+%{_libdir}/authplugins/libEnforceAuthRules.la
+%{_libdir}/authplugins/libMSFT_ExchangeTransferHack.la
+%{_libdir}/authplugins/libNatTraversalAgent.la
+%{_libdir}/authplugins/libRequestLinter.la
+%{_libdir}/authplugins/libSubscriptionAuth.la
+%{_libdir}/authplugins/libTransferControl.la
+%{_libdir}/libsipXproxy.la
+%{_includedir}/sipxproxy/*
+%{_libdir}/transactionplugins/libGatewayDestPlugin.la
+
+%post
+setcap 'CAP_SYS_RESOURCE=+ep' %{_bindir}/sipXproxy
+if grep -q :on <<<`/sbin/chkconfig sipxproxy --list 2>&1`; then
+    /sbin/chkconfig sipxproxy reset
+fi

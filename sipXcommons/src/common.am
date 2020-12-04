@@ -1,0 +1,54 @@
+
+# output from commons compile
+commons_classes = $(abspath $(top_builddir)/src/main/java/classes)
+
+# packages to build commons. You won't need all of these to run unless you call specific functions.
+# for example, non-spring projects wouldn't need spring deps
+commons_PKGS = \
+	Stun4J \
+	log4j \
+	smackx \
+	xml \
+	junit \
+	postgresql \
+	not-yet-commons \
+	jain-sip-sdp \
+	dnsjava \
+	commons-beanutils \
+	commons-io \
+	commons-codec \
+	commons-digester \
+	commons-lang \
+	commons-collections \
+	xmlrpc-client \
+	spring-beans \
+	spring-context \
+	spring-core \
+	org.springframework.transaction \
+	spring-data-mongodb \
+	spring-data-commons \
+	mongo \
+	org.restlet \
+	spring-data-redis \
+	jedis \
+	thumbnailator \
+	jaudiotagger \
+	jetty \
+	jetty-http \
+	jetty-io \
+	jetty-security \
+	jetty-server \
+	jetty-servlet \
+	jetty-util \
+	jetty-webapp \
+	jetty-xml \
+	servlet-api \
+	spring-security-cas \
+	spring-security-config \
+	spring-security-core \
+	spring-security-ldap \
+	spring-security-web \
+	joda-time \
+	hazelcast-all \
+	reflections \
+	guava

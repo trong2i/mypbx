@@ -1,0 +1,557 @@
+#!/bin/env ruby
+
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+#
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+#
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+
+# Archive and Restore commands
+
+require 'yaml'
+require 'fileutils'
+require 'uri'
+require 'net/ftp'
+require 'rubygems'
+require 'net/sftp'
+
+# Common code for backup and restore operations
+class ArchiveBase
+  attr_writer :verbose
+  attr_writer :out
+  attr_writer :dryrun
+
+  def initialize(config = nil)
+    @bin_dir = '@SIPX_BINDIR@'
+    @backup_dir = '@SIPX_VARDIR@/backup'
+    @backup_tmp_dir = '@SIPX_TMPDIR@/backup'
+    @restore_dir = '@SIPX_TMPDIR@/restore'
+    @out = $stdout
+    @ssh_params = "-o 'StrictHostKeyChecking=no' -i ~/.cfagent/ppkeys/localhost.nopass.priv"
+    load_config_file(config) unless config == nil
+    redirect_output
+  end
+
+  def load_config_file(config_file)
+    @config = config_file
+    @data = YAML::load_file(config_file)
+  end
+
+  def load_config_stream(config_stream)
+    @data = YAML::load(config_stream)
+  end
+
+  def cmd(cmd)
+    puts cmd if @verbose
+    @dryrun ? true : system(cmd)
+  end
+  
+  def get_log_file
+  end
+  
+  def redirect_output
+    log_file = get_log_file
+    unless log_file == nil
+      @logger = Logger.new(log_file)
+      $stdout.reopen(log_file, "a")
+      $stdout.sync = true
+      $stderr.reopen(log_file, "a")
+      $stderr.sync = true
+    end
+  end
+
+  def fresh_dir(dir)
+    # programming safeguard : ensure we do not delete '/'
+    raise "Internal error" if dir.strip.empty?
+    FileUtils.rm_rf dir unless @dryrun
+    FileUtils.mkdir_p dir unless @dryrun
+  end
+
+  def file_manager(params)
+    settings = @data['settings']
+    if !settings.nil? && settings.has_key?('ftp')
+      # ftp mode: make sure to clean any previous ftp backups
+      local = LocalFileManager.new("#{@backup_dir}/#{@data['plan']}")
+      local.save(1)
+      remote = nil
+      params = settings['ftp']
+      #convert the unicode characters to string
+      params['password'] = params['password'].split('.').map(&:to_i).pack("U*") unless params['password'] == nil
+      uri = URI.parse(params['url'])
+      if uri.scheme == "sftp"
+        remote = SftpFileManager.new("#{@backup_dir}/#{@data['plan']}")
+      elsif uri.scheme == "ftp"
+        remote = FtpFileManager.new("#{@backup_dir}/#{@data['plan']}")
+      else
+        puts("not a known protocol")
+      end
+      remote.connect(uri, params) unless @dryrun
+      return remote
+    end
+    LocalFileManager.new("#{@backup_dir}/#{@data['plan']}")
+  end
+end
+
+# Orchestrate backing up of cluster including uploading if ftp is configured
+# and purging old backups.
+class Backup < ArchiveBase  
+  def run(params, args)
+      #create directory to hold backups
+      date_dir = Time.now.strftime("%Y%m%d%H%M")
+      fresh_dir "#{@backup_dir}/#{@data['plan']}/#{date_dir}"
+      @data['hosts'].each { |location_id, meta|
+      host = meta['host']
+      if cmd("ssh #{@ssh_params} root@#{host} sipx-archive --backup-host #{location_id} < #{@config}")
+        if meta.key?('backup')
+          meta['backup'].each do |defId, command|
+            #cfengine does not accept '.' characters to be sent as variable values
+            defId_name = defId.split('.')[0]
+            unless cmd("#{@bin_dir}/sipxagent -b backup_collect -d #{defId_name}_definition")
+              @logger.error("ALARM_BACKUP_FAILED error: DONE but could not collect backup from host #{host}")
+              if Dir["#{@backup_dir}/#{@data['plan']}/#{date_dir}/*"].empty?
+                @logger.info("Newly created #{@backup_dir}/#{@data['plan']}/#{date_dir} is empty - remove it")
+                FileUtils.rm_rf "#{@backup_dir}/#{@data['plan']}/#{date_dir}"
+              end              
+              @logger.info("Exit with exception")
+              raise "Error condition. EXIT"
+            end
+            if File.exists?("#{@backup_tmp_dir}/#{defId}")
+              FileUtils.mv("#{@backup_tmp_dir}/#{defId}", "#{@backup_dir}/#{@data['plan']}/#{date_dir}/#{defId}")
+            end
+          end
+        end
+      else
+        @logger.error("ALARM_BACKUP_FAILED error: Cannot complete on host #{host}")
+        if Dir["#{@backup_dir}/#{@data['plan']}/#{date_dir}/*"].empty?
+          @logger.info("Newly created #{@backup_dir}/#{@data['plan']}/#{date_dir} is empty - remove it")
+          FileUtils.rm_rf "#{@backup_dir}/#{@data['plan']}/#{date_dir}"
+        end
+        @logger.info("Exit with exception")
+        raise "Error condition. EXIT"
+      end
+    }
+    fs = file_manager(params)
+    fs.save(@data['max']) unless @dryrun
+  end
+  
+  def get_log_file
+    return '@SIPX_LOGDIR@/backup.log'
+  end
+
+  def hosts_param
+      hosts_array = Array.new 
+      @data['hosts'].each { |location_id, meta|
+        host = meta['host']
+        hosts_array.push(host)
+      }
+    hosts_array.join(' -h ')
+  end
+
+  def define_param(params)
+    ""
+  end
+end
+
+# Orchestrate restore a cluster including staging file from local or ftp plan.
+class Restore < Backup
+  def initialize(config, paths)
+    super(config)
+    @paths = paths
+  end
+  def run(params, args)
+    mgr = file_manager(params)
+    # nothing specified, assume files are already staged.
+    unless @paths.empty?
+      fresh_dir @restore_dir
+      @paths.each {|path|
+        dir, fname = path.split('/')
+        mgr.stage(dir, fname, @restore_dir)
+      }
+    end
+    defines = define_param(params)
+    @data['hosts'].each { |location_id, meta|
+      host = meta['host']
+      #pull archive on restore location
+      if meta.key?('restore')
+        meta['restore'].each do |defId, command|
+          #cfengine does not accept '.' characters to be sent as variable values
+          defId_name = defId.split('.')[0]
+          unless cmd("#{@bin_dir}/sipxagent -h #{host} -b restore_collect -d #{defId_name}_definition")
+            raise "RESTORE cannot INITIATE: Could not collect backup from host #{host}"
+          end
+        end
+      end
+      unless cmd("ssh #{@ssh_params} root@#{host} sipx-archive --restore-host #{location_id} < #{@config}")
+        raise "RESTORE FAILED: Could not complete restore on host #{host}"
+      end
+    }
+  end
+  
+  def get_log_file
+    return '@SIPX_LOGDIR@/restore.log'
+  end  
+end
+
+# List current backups in chronological order based on directory name following
+# YearMonthDayHourMin pattern not based on file timestamp
+class ListBackups < ArchiveBase
+  def run(params, args)
+    mgr = file_manager(params)
+    mgr.list.each {|backup|
+      items = mgr.list_items(backup)
+      @out.puts "#{backup} #{items.join(' ')}"
+    }
+  end 
+end
+
+# Common code for managing backup lists
+class FileManagerBase
+
+  def initialize(backup_dir)
+    @backup_dir = backup_dir
+  end
+
+  def select_backups(list)
+    filtered = list.select { |f|
+      # ignore dirs that don't appear to be backups
+      f =~ /^\d{12}$/
+    }
+    filtered.sort!.reverse!
+  end
+
+  # Call given block on oldest backups that exceed max backup count
+  def purgable(max)
+    all = list.reverse
+    if max != nil && all.length > max
+      for i in 0..((all.length - max) - 1)
+        yield all[i]
+      end
+    end
+  end
+end
+
+# Listing, uploading and purging backups on SFTP server
+class SftpFileManager < FileManagerBase
+
+  def initialize(backup_dir)
+    @backup_dir = backup_dir
+  end
+
+  def connect(uri, params)
+    @uri = uri
+    @params = params
+    @ftp = Net::SFTP.start(uri.host, params['user'], :password => params['password'])
+    @path = sanitize_path(uri.path)
+  end
+
+  def save(max)
+    # handy - reuse local backup file handler to manage temp ftp directory
+    local = LocalFileManager.new(@backup_dir)
+
+    upload(local.list.last)
+
+    purgable(max) { |b|
+      purge(b)
+    }
+
+    local.save(0)
+  end
+
+  def sanitize_path(path)
+    path.gsub(%r[^/],'').gsub(%r[/$],'')
+  end
+
+  def purge(b)
+    @ftp.dir.glob("#{@path}/#{b}", "*") {|entry|
+      @ftp.remove! "#{@path}/#{b}/#{entry.name}"
+    }
+    @ftp.rmdir!("#{@path}/#{b}")
+  end
+
+  def mkdir_p(dir)
+    p = ''
+    dir.split('/').each {|d|
+      p = p + d + '/'
+      begin
+        @ftp.file.directory? p
+      rescue Net::SFTP::StatusException        
+        # failed? according to SFTP lib then it's not a directory.
+        @ftp.mkdir!(p)
+      end
+    }
+  end
+
+  def upload(b)
+    mkdir_p "#{@path}/#{b}"
+    Dir["#{@backup_dir}/#{b}/*"].each {|f|
+      @ftp.upload!(f, "#{@path}/#{b}/#{File.basename(f)}")
+    }
+  end
+
+  def list
+    begin
+      @ftp = Net::SFTP.start(@uri.host, @params['user'], :password => @params['password']) 
+      candidates = @ftp.dir.glob(@path, '*').collect { |f| f.name }
+      select_backups(candidates)
+    rescue Net::SFTP::StatusException
+      # you can get failure if dir doesn't exist yet. cowardly fail
+      return []
+    end
+  end
+
+  def list_items(b)
+    @ftp.dir.glob("#{@path}/#{b}", '*').collect { |f| f.name }
+  end
+
+  def stage(dir, file, dst)
+    @ftp.download!("#{@path}/#{dir}/#{file}", "#{dst}/#{file}")
+  end
+end
+
+# Listing, uploading and purging backups on FTP server
+class FtpFileManager < FileManagerBase
+
+  @uri = nil
+  @params = nil
+  
+  def initialize(backup_dir)
+    @backup_dir = backup_dir
+  end
+
+  def connect(uri, params)
+    @uri = uri    
+    @params = params
+  end
+
+  def save(max)
+    # handy - reuse local backup file handler to manage temp ftp directory
+    local = LocalFileManager.new(@backup_dir)
+    begin
+      upload(local.list.last)
+    rescue Exception => e
+      puts("ALARM_BACKUP_FAILED error: Cannot upload backup")
+      puts("Exit with exception")
+      raise e.message
+    end  
+
+    purgable(max) { |b|
+      purge(b)
+    }
+
+    local.save(0)
+  end
+
+  def sanitize_path(path)
+    path.gsub(%r[^/],'').gsub(%r[/$],'')
+  end
+
+  def select_backups(list)
+    filtered = list.select { |f|
+      # ignore dirs that don't appear to be backups
+      f =~ /\d{12}$/
+    }
+    filtered.sort!.reverse!
+  end
+
+  def purge(b)
+    Net::FTP.open(@uri.host.to_s, @params['user'].to_s, @params['password'].to_s) do |ftp|
+      ftp.passive = true
+      ftp.chdir("/#{@uri.path}/#{b}")
+      ftp.nlst("*").each{ |entry|
+        ftp.delete(entry)
+      }
+      ftp.chdir("/#{@uri.path}")
+      ftp.rmdir("#{b}")
+    end
+  end
+
+  def upload(b)
+    Net::FTP.open(@uri.host.to_s, @params['user'].to_s, @params['password'].to_s) do |ftp|
+      ftp.passive = true
+      ipad_folder = ftp.list("/#{@uri.path}")
+      ftp.mkdir("/#{@uri.path}/#{b}") if !ipad_folder.any?{|dir| dir.match(/\s#{b}$/)}
+      Dir["#{@backup_dir}/#{b}/*"].each {|f|
+        ftp.putbinaryfile(f, "/#{@uri.path}/#{b}/#{File.basename(f)}")
+      }
+    end
+  end
+
+  def list
+    Net::FTP.open(@uri.host.to_s, @params['user'].to_s, @params['password'].to_s) do |ftp|
+      ftp.passive = true
+      ftp.chdir("/#{@uri.path}")
+      candidates = ftp.nlst("*").collect { |f| f }
+      select_backups(candidates)
+    end
+  end
+
+  def list_items(b)
+    Net::FTP.open(@uri.host.to_s, @params['user'].to_s, @params['password'].to_s) do |ftp|
+      ftp.passive = true
+      ftp.chdir("/#{@uri.path}/#{b}")
+      return ftp.nlst("*").collect { |f| f }
+    end
+  end
+
+  def stage(dir, file, dst)
+    Net::FTP.open(@uri.host.to_s, @params['user'].to_s, @params['password'].to_s) do |ftp|
+      ftp.passive = true
+      ftp.getbinaryfile("/#{@uri.path}/#{dir}/#{file}", "#{dst}/#{file}", 1024)
+    end
+  end
+end
+
+# Listing and purging backups on Local System
+class LocalFileManager < FileManagerBase
+
+  def initialize(backup_dir)
+    @backup_dir = backup_dir
+  end
+
+  def save(max)
+    purgable(max) { |b|
+      FileUtils.rm_r("#{@backup_dir}/#{b}")
+    }
+  end
+
+  def list
+    return [] unless File.exists? @backup_dir
+    # NOTE: Dir.chdir(d) { } will throw Permission Denied when run from java env.
+    Dir.chdir(@backup_dir)
+    select_backups(Dir["*"])
+  end
+
+  def list_items(b)
+    # NOTE: Dir.chdir(d) { } will throw Permission Denied when run from java env.
+    Dir.chdir("#{@backup_dir}/#{b}")
+    return Dir["*"]
+  end
+
+  def stage(dir, file, dst)
+    FileUtils.cp("#{@backup_dir}/#{dir}/#{file}", "#{dst}/#{file}")
+  end
+end
+
+class ArchiveHost < ArchiveBase
+  attr_writer :verbose
+
+  def initialize(config_stream, location_id)
+    super()
+    @location_id = location_id
+    load_config_stream(config_stream)
+  end
+
+end
+
+class BackupHost < ArchiveHost
+  def run(params, args)
+    fresh_dir @backup_tmp_dir
+    if @data.key?('hosts') and @data['hosts'].key?(@location_id)
+      meta = @data['hosts'][@location_id]
+      if meta.key?('backup')
+        meta['backup'].each do |defId, command|
+          file = "#{@backup_tmp_dir}/#{defId}"
+          line = command % file
+          unless cmd(line)
+            @logger.error("ALARM_BACKUP_FAILED error: Failed to backup #{defId} using command #{line}")
+            @logger.info("Exit with exception")
+            raise "Error condition. EXIT"
+          end 
+        end
+      end
+    end
+  end
+end
+
+class RestoreHost < ArchiveHost
+  def run(params, args)
+    if @data.key?('hosts') and @data['hosts'].key?(@location_id)
+      meta = @data['hosts'][@location_id]
+      if meta.key?('restore')
+        meta['restore'].each do |defId, command|     
+          file = "#{@restore_dir}/#{defId}"
+          line = command % file 
+          if File.exists?(file)
+            line = command % file
+            cmd(line) or
+             raise "RESTORE error: Failed to restore #{defId} using command #{line}"
+          end   
+        end
+      end
+    end
+  end
+end
+
+if __FILE__ == $0
+
+require 'optparse'
+params = {}
+operation = nil
+dryrun = false
+
+verbose = false
+args = OptionParser.new { |opts|
+  opts.banner = <<EOF
+Create or restore backups and archives.
+EOF
+
+  opts.on("--backup config.yaml",
+      "Restore the specified Configuration archive."){ |v|    
+    operation = Backup.new(v)
+  }
+
+  opts.on("--restore config.yaml,paths", Array,
+      "Restore the specified Configuration archive."){ |v|
+    operation = Restore.new(v[0], v[1..v.size])
+  }
+
+  opts.on("--list config.yaml", "List the current backups."){ |v|
+    operation = ListBackups.new(v)
+  }
+
+  opts.on("--backup-host location_id",
+      "Only to be called internally over ssh by this script. Requires config be passed on stdin") {|location_id|
+    operation = BackupHost.new(STDIN, location_id.to_i())
+  }
+
+  opts.on("--restore-host location_id",
+      "Only to be called internally over ssh by this script. Required config be passed on stdin") {|location_id|
+    operation = RestoreHost.new(STDIN, location_id.to_i())
+  }
+
+  $output = $stdout
+  opts.on("--out file", "Send data to stdout"){ |v|
+    $output = File.open(v, "w")
+  }
+
+  opts.on("--verbose",
+      "Restore the specified Configuration archive."){
+    verbose = true
+  }
+
+  opts.on("--dryrun", "Do not execute any commands."){
+    dryrun = true
+  }
+}
+args.parse!
+
+if operation.nil?
+  raise "Must specify either restore or backup options."
+end
+
+operation.verbose = verbose
+operation.dryrun = dryrun
+operation.out = $output
+operation.run(params, ARGV)
+exit 0
+
+end
+

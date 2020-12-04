@@ -1,0 +1,84 @@
+<?xml version="1.0"?>
+<!DOCTYPE model
+    PUBLIC "-//SIPFoundry//sipXconfig//Model specification 2.0//EN"
+    "http://www.sipfoundry.org/sipXconfig/dtd/setting_2_0.dtd">
+<model>
+  <group name="sipLines">
+    <label>sipLine</label>
+    <setting name="featureID">
+      <label>feature ID</label>
+      <value>9</value>
+    </setting>
+    <setting name="featureLabel">
+      <label>Feature Label</label>
+      <value/>
+    </setting>
+    <setting name="proxy">
+      <label>SIP Proxy</label>
+      <value>USECALLMANAGER</value>
+    </setting>
+    <setting name="port">
+      <label>SIP Port</label>
+      <value/>
+    </setting>
+    <setting name="name">
+      <label>User Name</label>
+      <value/>
+    </setting>
+    <setting name="displayName" advanced="yes">
+      <label>Display Name</label>
+      <value/>
+    </setting>
+    <setting name="autoAnswerEnabled">
+       <label>Auto Answer Enabled</label>
+       <value>2</value>
+    </setting>
+    <setting name="callWaiting">
+       <label>Call Waiting</label>
+       <value>3</value>
+    </setting>
+    <setting name="authName">
+        <label>SIP Authentication Name (if different from User Name)</label>
+        <value/>
+    </setting>
+    <setting name="authPassword" advanced="yes">
+      <label>SIP Authentication Password</label>
+      <type>
+        <string password="yes"/>
+      </type>
+      <value/>
+    </setting>
+    <setting name="sharedLine">
+       <label>Shared Line</label>
+       <value>false</value>
+    </setting>
+    <setting name="messageWaitingLampPolicy">
+       <label>Message Waiting Lamp Policy</label>
+       <value>1</value>
+    </setting>
+    <setting name="messagesNumber">
+       <label>Voicemail Number</label>
+       <value/>
+    </setting>
+    <setting name="ringSettingIdle">
+       <label>Ring Setting Idle</label>
+       <value>4</value>
+    </setting>
+    <setting name="ringSettingActive">
+       <label>Ring Setting Active</label>
+       <value>5</value>
+    </setting>
+    <setting name="contact">
+       <label>SIP Contact</label>
+       <value/>
+    </setting>
+    <setting name="callerName">
+       <label>Caller Name</label>
+       <value>true</value>
+    </setting>
+    <setting name="maxNumCalls">
+       <label>Maximum Number of Calls</label>
+       <value>4</value>
+    </setting>
+  </group>
+</model>

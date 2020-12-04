@@ -1,0 +1,124 @@
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  SIP Registry/Redirect Server
+License:  Pingtel Commercial License
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url:      http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: pcre-devel
+BuildRequires: sipxcommserverlib-devel  >= %version
+BuildRequires: sipxportlib-devel        >= %version
+BuildRequires: sipxtacklib-devel        >= %version
+
+Source:   %name-%version.tar.gz
+
+Requires: sipxcommserverlib >= %version
+Requires: chkconfig
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+sipXregistry is the registry/redirect server component of the sipX family.
+It shares a number of common components with the rest of the family, but
+can be used as a standalone server.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%package devel
+Requires: %name
+Group: Development/Libraries
+Vendor: SIPfoundry
+Summary: Internal documentation for %name
+Requires: sipxcommserverlib-devel >= %version
+
+%description devel
+Internal class documentation for the registry classes, and the include
+files that define hook interfaces.
+
+%prep
+%setup -q
+chmod 755 *
+# suse and obs build system
+mv %{_builddir}/%name-%version/%name-rpmlintrc %{_sourcedir}
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+
+%doc  %name.configlog
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxregistrar
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxregistrar.cf
+%attr(755,root,root) %{_bindir}/sipregistrar
+%attr(755,root,root) %{_bindir}/sipXregTool
+%attr(755,root,root) %{_libdir}/libRegistrarImpliedMWI.so*
+%attr(755,root,root) %{_libdir}/libRedirectorAliasDB.so*
+%attr(755,root,root) %{_libdir}/libRedirectorAuthRouter.so*
+%attr(755,root,root) %{_libdir}/libRedirectorENUM.so*
+%attr(755,root,root) %{_libdir}/libRedirectorISN.so*
+%attr(755,root,root) %{_libdir}/libRedirectorJoin.so*
+%attr(755,root,root) %{_libdir}/libRedirectorMapping.so*
+%attr(755,root,root) %{_libdir}/libRedirectorFallback.so*
+%attr(755,root,root) %{_libdir}/libRedirectorPresenceRouting.so*
+%attr(755,root,root) %{_libdir}/libRedirectorPickUp.so*
+%attr(755,root,root) %{_libdir}/libRedirectorRegDB.so*
+%attr(755,root,root) %{_libdir}/libRedirectorSubscribe.so*
+%attr(755,root,root) %{_libdir}/libRedirectorUserParam.so*
+%attr(755,root,root) %{_libdir}/libRedirectorTest.so*
+%attr(755,root,root) %{_libdir}/libRedirectorTimeOfDay.so*
+%attr(755,root,root) %{_datadir}/sipxecs/schema/alias.xsd
+%attr(755,root,root) %{_datadir}/sipxecs/schema/caller-alias.xsd
+%attr(755,root,root) %{_datadir}/sipxecs/schema/fallbackrules.xsd
+%attr(755,root,root) %{_datadir}/sipxecs/schema/reg-instrument.xsd
+
+%files devel
+%defattr(644,root,root,755)
+%{_libdir}/libRedirectorAliasDB.la
+%{_libdir}/libRedirectorAuthRouter.la
+%{_libdir}/libRedirectorENUM.la
+%{_libdir}/libRedirectorFallback.la
+%{_libdir}/libRedirectorISN.la
+%{_libdir}/libRedirectorJoin.la
+%{_libdir}/libRedirectorMapping.la
+%{_libdir}/libRedirectorPickUp.la
+%{_libdir}/libRedirectorPresenceRouting.la
+%{_libdir}/libRedirectorRegDB.la
+%{_libdir}/libRedirectorSubscribe.la
+%{_libdir}/libRedirectorTest.la
+%{_libdir}/libRedirectorTimeOfDay.la
+%{_libdir}/libRedirectorUserParam.la
+%{_libdir}/libRegistrarImpliedMWI.la
+%dir %{_includedir}/registry
+%{_includedir}/registry/*
+
+%pre
+
+%post
+/sbin/ldconfig
+setcap 'CAP_SYS_RESOURCE=+ep' %{_bindir}/sipregistrar
+if grep -q :on <<<`/sbin/chkconfig sipxregistrar --list 2>&1`; then
+    /sbin/chkconfig sipxregistrar reset
+fi
+
+%postun
+/sbin/ldconfig

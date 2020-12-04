@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!DOCTYPE model PUBLIC "-//SIPFoundry//sipXconfig//Model specification 2.0//EN"
+  "http://www.sipfoundry.org/sipXconfig/dtd/setting_2_0.dtd">
+<model>
+  <type id="binary">
+    <file>
+      <contentType>application/binary</contentType>
+    </file>
+  </type>
+  <group name="audiocodesPhoneFirmware">
+    <label>Audiocodes HD Series IP Phone Firmware Files</label>
+    <setting name="310HD">
+    <label>310HD Firmware File</label>
+       <type>
+        <file>
+          <contentType>application/binary</contentType>
+          <rename>310HD.img</rename>
+        </file>
+      </type>
+    </setting>
+    <setting name="320HD">
+    <label>320HD Firmware File</label>
+      <type>
+        <file>
+          <contentType>application/binary</contentType>
+          <rename>320HD.img</rename>
+        </file>
+      </type>
+    </setting>
+    <setting name="420HD">
+    <label>420HD Firmware File</label>
+      <type>
+        <file>
+          <contentType>application/binary</contentType>
+          <rename>420HD.img</rename>
+        </file>
+      </type>
+    </setting>
+    <setting name="430HD">
+    <label>430HD Firmware File</label>
+      <type>
+        <file>
+          <contentType>application/binary</contentType>
+          <rename>430HD.img</rename>
+        </file>
+      </type>
+    </setting>
+    <setting name="440HD">
+    <label>440HD Firmware File</label>
+      <type>
+        <file>
+          <contentType>application/binary</contentType>
+          <rename>440HD.img</rename>
+        </file>
+      </type>
+    </setting>
+  </group>
+</model>

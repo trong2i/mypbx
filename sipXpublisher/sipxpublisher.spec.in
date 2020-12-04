@@ -1,0 +1,82 @@
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  SIP SUBSCRIBE/NOTIFY Server
+License:  Pingtel Commercial License
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url:      http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: openssl-devel
+BuildRequires: sipxcommserverlib-devel >= %version
+BuildRequires: sipxportlib-devel >= %version
+BuildRequires: sipxtacklib-devel >= %version
+
+Source:   %name-%version.tar.gz
+
+Requires: sipxcommserverlib >= %version
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+A modular server for handling SIP event subscriptions; event package types
+can be added through a dynamically linked library interface, configured through
+a simple XML plugin configuration file.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%package devel
+Requires: %name
+Requires: sipxcommserverlib-devel >= %version
+Requires: chkconfig
+Group: Development/Libraries
+Vendor: SIPfoundry
+Summary: Header files for %name
+
+%description devel
+Developer support for sipXpublisher.  This is needed in order to create event package
+plug-in modules.
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%doc  %name.configlog
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxpublisher
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxpublisher.cf
+%attr(755,root,root) %{_bindir}/sipstatus
+
+%files devel
+%defattr(644,root,root,755)
+%dir %{_includedir}/statusserver
+%{_includedir}/statusserver/*
+
+%pre
+
+%post
+setcap 'CAP_SYS_RESOURCE=+ep' %{_bindir}/sipstatus
+if grep -q :on <<<`/sbin/chkconfig sipxpublisher --list 2>&1`; then
+    /sbin/chkconfig sipxpublisher reset
+fi

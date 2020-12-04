@@ -1,0 +1,62 @@
+#!BuildIgnore: post-build-checks
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @PACKAGE_REVISION@
+
+Summary: Paging solution for sipX
+License: LGPL
+Group: Productivity/Telephony/SIP/Servers
+Vendor: SIPfoundry
+Packager: SIPfoundry <sipx-dev@sipfoundry.org>
+Url: http://www.sipfoundry.org/sipXbridge
+
+BuildRequires: automake
+BuildRequires: java-1.7.0-openjdk-devel
+BuildRequires: zip
+BuildRequires: sipxcommons >= %version
+
+Source: %name-%version.tar.gz
+
+Requires: sipxcommserverlib >= %version
+Requires: sipxcommons >= %version
+Requires: chkconfig
+
+%if %{?use_ibm_jvm}0
+Requires: java-ibm >= 1.6
+Requires: java-ibm-unrestricted
+%endif
+
+Prefix: %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+Paging solution for SIPX PBX.
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make all
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxpage
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxpage.cf
+%{_datadir}/java/sipXecs/sipXpage/sipXpage.jar
+%dir %attr(755,sipx,sipx) %{_localstatedir}/sipxdata
+%config(noreplace) %attr(755,sipx,sipx) %{_localstatedir}/sipxdata/sipxpage
+%config(noreplace) %{_sysconfdir}/sipxpbx/sipxpage/log4j.properties
+
+%post
+if grep -q :on <<<`/sbin/chkconfig sipxpage --list 2>&1`; then
+    /sbin/chkconfig sipxpage reset
+fi

@@ -1,0 +1,12 @@
+audiocodes_PKGS = \
+	sipxconfig-neoconf \
+	spring-context \
+	spring-core \
+	spring-beans \
+	commons-lang \
+	commons-io \
+	easymock \
+	easymockclassextension \
+	velocity
+
+

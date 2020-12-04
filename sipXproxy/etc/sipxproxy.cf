@@ -1,0 +1,190 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+#
+# sipXproxy configuration and process management
+#
+bundle agent sipxproxy {
+  methods:
+    sipxproxy::
+      "any" usebundle => "sipxcommserverlib";
+
+      # if relay is supposed to start, it needs to start up first
+      # so reference it here.
+      "any" usebundle => "sipxrelay";
+
+      "any" usebundle => "sipxproxy_config";
+    any::
+      "any" usebundle => "sipxproxy_setup";
+      "any" usebundle => "sipxproxy_running";
+    sipxlogwatcher::
+      "any" usebundle => "sipxproxy_logwatcher";
+}
+
+bundle agent sipxproxy_logwatcher {
+  files:
+    "$(sipx.SIPX_CONFDIR)/sipxlogwatcher.d/sipxproxy.tmp"
+      comment => "sipxproxy log watcher",
+      create => "true",
+      perms => m(644),
+      transformer => "$(sipx.SIPX_LIBEXECDIR)/sipxlogwatcher-maker --in $(sipx.SIPX_CFDATA)/$(sipx.location_id)/alarms.yaml --template $(sipx.SIPX_CONFDIR)/sipxproxy/sipxproxy.sec.erb --out $(this.promiser)";     
+      
+    "$(sipx.SIPX_CONFDIR)/sipxlogwatcher.d/sipxproxy.sec"
+      comment => "sipxproxy log watcher",
+      create => "true",
+      perms => m(644),
+      copy_from => local_cp_by_digest("$(sipx.SIPX_CONFDIR)/sipxlogwatcher.d/sipxproxy.tmp"),
+      classes => if_repaired("reload_sipxlogwatcher");      
+}
+
+bundle agent sipxproxy_config {
+  vars:
+    # XX-8932 - sipxbridge.xml is a strange dependency, but there because of
+    # strange hack made in proxy to try to support routing directory to bridge
+    any::
+      "xml_file" slist => {
+        "peeridentities.xml",
+        "mappingrules.xml",
+        "authrules.xml",
+        "fallbackrules.xml",
+        "forwardingrules.xml",
+        "sipxbridge.xml"
+      };
+
+  files:
+    any::
+      "$(sipx.SIPX_CONFDIR)/sipXproxy-config"
+        comment => "install $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        edit_line => sipXproxy_config_contents(),
+        classes => if_repaired("sipxproxy_properties_changed");
+    
+    any::   
+      "$(sipx.SIPX_CONFDIR)/resource-limits-proxy.ini"
+        comment => "proxy resource limits changed - restart sipXproxy",
+        create => "true",
+        perms => m("644"),
+        copy_from => copy_from_cfdata("$(sipx.location_id)/resource-limits-proxy.ini"),
+        classes => if_repaired("restart_sipxproxy");        
+
+    any::
+      "$(sipx.SIPX_CONFDIR)/$(xml_file)"
+        comment => "install $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        copy_from => copy_from_cfdata("$(sipx.location_id)/$(xml_file)"),
+        classes => if_repaired("restart_sipxproxy_and_registrar");
+
+      "$(sipx.SIPX_CONFDIR)/nattraversalrules.xml"
+        comment => "install NAT traversal rules $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        copy_from => copy_from_cfdata("$(sipx.location_id)/nattraversalrules.xml"),
+        classes => if_repaired("redeploy_nat");
+}
+
+bundle edit_line sipXproxy_config_contents() {
+  insert_lines:
+    any::
+      "$(sipx.SIPX_CFDATA)/$(sipx.location_id)/sipXproxy-config.part"
+        insert_type => "file",
+        expand_scalars => "true";
+      "SIPX_PROXY.400_authrules.RULES : $(sipx.SIPX_CONFDIR)/authrules.xml";
+      "SIPX_PROXY.990_emerglineid.EMERGRULES : $(sipx.SIPX_CONFDIR)/authrules.xml";
+      "SIPX_PROXY_BIND_IP : $(sipx.bind_ip)";
+      "SIPX_TRAN_HOOK_LIBRARY.905_gatewaydest : $(sipx.SIPX_LIBDIR)/transactionplugins/libGatewayDestPlugin.so";
+    homer::
+      "SIPX_TRAN_HOOK_LIBRARY.100_sipxhomer : $(sipx.SIPX_LIBDIR)/transactionplugins/libsipXhomerProxyPlugin.so";
+
+  delete_lines:
+    any::
+      ".*";
+}
+
+bundle agent sipxproxy_setup {
+  methods:
+    !src.sipxproxy::
+      "any" usebundle => rh_chkconfig_status("sipxproxy on");
+    !src.!sipxproxy::
+      "any" usebundle => rh_chkconfig_status("sipxproxy off");
+}
+
+bundle agent sipxproxy_running {
+  vars:
+    any::
+      "service_command" string => "$(sipx.SIPX_BINDIR)/sipXproxy";
+
+  classes:
+    mongo_local_reconnect::
+      "restart_sipxproxy" expression => "any";
+    sipxproxy.sipxproxy_properties_changed::
+  	  "restart_sipxproxy" not => fileexists("$(sipx.SIPX_CONFDIR)/sipXproxy-config.cf-before-edit");
+
+  methods:
+    any::
+      "any" usebundle => find_sipxservice_by_command("$(service_command)","sipxproxy_running");
+
+	sipxproxy.sipxproxy_properties_changed.!restart_sipxproxy::
+      "sipxproxy_properties_changed" usebundle => refresh_sip_service("SIPX_PROXY_LOG_LEVEL : (DEBUG|INFO|NOTICE|WARNING|ERR|ERROR|CRIT|ALERT|EMERG)",
+      										 "$(sipx.SIPX_CONFDIR)/sipXproxy-config",
+      										 "$(sipx.SIPX_CONFDIR)/sipXproxy-config.cf-before-edit",
+      										 "sipxproxy"); 
+      										 
+  commands:
+    (!sipxproxy|stop_sipxecs).sipxproxy_running::
+      "$(sipx.SIPX_SERVICEDIR)/sipxproxy"
+        comment => "stop sipxproxy",
+        args => "stop";
+
+    !sipxcdr.sipxproxy.!sipxproxy_running.!stop_sipxecs::
+      "$(sipx.SIPX_SERVICEDIR)/sipxcdr"
+        comment => "Setup SIPXCDR database used by sipXproxy to insert call_state_events",
+        args => "setup";        
+
+    sipxproxy.!sipxproxy_running.!stop_sipxecs::
+      "$(sipx.SIPX_SERVICEDIR)/sipxproxy"
+        comment => "start sipxproxy",
+        args => "start";
+
+    sipxproxy.sipxproxy_running.(restart_sipxproxy|restart_sipxecs)::
+      "$(sipx.SIPX_SERVICEDIR)/sipxproxy"
+        comment => "restart sipxproxy",
+        args => "asyncrestart";
+
+    redeploy_nat.sipxrelay::
+      "$(sipx.SIPX_SERVICEDIR)/sipxrelay"
+        comment => "redeploy NAT config - restart sipxrelay",
+        args => "restart";
+
+    (restart_sipxproxy_and_registrar|redeploy_nat).sipxproxy::
+      "$(sipx.SIPX_SERVICEDIR)/sipxproxy"
+        comment => "dialplan or NAT config redeploy - restart sipxproxy",
+        args => "restart";
+
+    (restart_sipxproxy_and_registrar|redeploy_nat).sipxregistrar::
+      "$(sipx.SIPX_SERVICEDIR)/sipxregistrar"
+        comment => "dialplan or NAT config redeploy -restart sipxregistrar",
+        args => "restart";
+
+    redeploy_nat.sipxbridge::
+      "$(sipx.SIPX_SERVICEDIR)/sipxbridge"
+        comment => "redeploy NAT config - restart sipxbridge",
+        args => "restart";
+
+    sipxproxy.sipxproxy_running.refresh_sipxproxy::
+      "/usr/bin/killall"
+        comment => "refresh sipXproxy",
+        args => "-HUP sipXproxy";
+}
+

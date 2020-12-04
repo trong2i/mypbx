@@ -1,0 +1,40 @@
+## Velocity macros
+#macro(generate_severs_list $servers_list $label)
+#foreach ($server in $servers_list)
+		<$label>
+			<host>$server.address</host>
+			<port>$server.port</port>
+		</$label>
+#end
+#end
+<?xml version="1.0" ?>
+<sipxopenfire-config xmlns="http://www.sipfoundry.org/sipX/schema/xml/sipxopenfire-00-00">
+	<sipx-proxy-domain>${domainName}</sipx-proxy-domain>
+	<sipx-proxy-port>${proxyPort}</sipx-proxy-port>
+	<user-name>$username</user-name>
+	<password>$password</password>
+	<resource-list>$resource-list</resource-list>
+	<watcher-address>${location.address}</watcher-address>
+	<watcher-port>${settings.watcherPort}</watcher-port>
+	<watcher-enabled>$settings.presenceEnabled</watcher-enabled>
+	<parsing-enabled>${enableParsing}</parsing-enabled>
+	<log-directory>/opt/openfire/logs</log-directory>
+	<openfire-xml-rpc-port>$settings.consolePort</openfire-xml-rpc-port>
+	<openfire-xml-rpc-vcard-port>$settings.xmlRpcVcardPort</openfire-xml-rpc-vcard-port>
+	<openfire-host>${location.fqdn}</openfire-host>
+	<locale>${settings.locale}</locale>
+	<sipxrest-ip-address>$!{restAddress.address}</sipxrest-ip-address>
+	<sipxrest-public-http-port>$!{restPublicAddress.port}</sipxrest-public-http-port>
+	<sipxrest-http-port>$!{restAddress.port}</sipxrest-http-port>
+	<server-to-server>
+		<enabled>${settings.serverToServer}</enabled>
+		<port>${settings.xmppFederationPort}</port>
+		<disconnect-on-idle>${settings.disconnectOnIdle}</disconnect-on-idle>
+		<idle-timeout>${settings.idleTimeout}</idle-timeout>
+		<any-can-connect>${settings.anyCanConnect}</any-can-connect>
+#generate_severs_list($settings.allowedServers, 'allowed-servers')
+#generate_severs_list($settings.disallowedServers, 'disallowed-servers')
+	</server-to-server>
+	<IM-message-logging>${settings.messageLogEnabled}</IM-message-logging>
+	<IM-message-logging-directory>${settings.logDir}</IM-message-logging-directory>
+</sipxopenfire-config>

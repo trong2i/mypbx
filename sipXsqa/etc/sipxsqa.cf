@@ -1,0 +1,117 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+#
+# sipXsqa server configuration and process management
+#
+bundle agent sipxsqa {
+  methods:
+    sipxsqa::
+      "any" usebundle => "sipxsqa_config";
+    any::
+      "any" usebundle => "sipxsqa_running";
+}
+
+bundle agent sipxsqa_config {
+  files:
+    any::
+      "$(sipx.SIPX_CONFDIR)/sipxsqa-config"
+        comment => "install sipxsqa config $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        edit_line => sipxsqa_config_contents(),
+        classes => if_repaired("sipxsqa_properties_changed");
+}
+
+bundle edit_line sipxsqa_config_contents {
+  insert_lines:
+    any::
+      "$(sipx.SIPX_CFDATA)/$(sipx.location_id)/sipxsqa-config.part"
+        insert_type => "file";
+      "sqa-control-address = $(sipx.bind_ip)";
+      "zmq-subscription-address = $(sipx.bind_ip)";
+      
+  delete_lines:
+    any::
+      ".*";
+}
+
+bundle agent sipxsqa_running {
+  vars:
+    any::
+      "service_command" string => "$(sipx.SIPX_BINDIR)/sipxsqa";
+
+  classes:
+    sipxsqa.sipxsqa_properties_changed::
+  	  "restart_sipxsqa" not => fileexists("$(sipx.SIPX_CONFDIR)/sipxsqa-config.cf-before-edit");			 
+
+  methods:
+    any::
+      "any" usebundle => find_sipxservice_by_command("$(service_command)","sipxsqa_running");
+    !src.sipxsqa::
+      "any" usebundle => rh_chkconfig_status("sipxsqa on");
+    !src.!sipxsqa::
+      "any" usebundle => rh_chkconfig_status("sipxsqa off");
+    sipxsqa.sipxsqa_properties_changed.!restart_sipxsqa::
+      "sipxsqa_properties_changed" usebundle => refresh_sip_service("log-level=\d",
+      										 "$(sipx.SIPX_CONFDIR)/sipxsqa-config",
+      										 "$(sipx.SIPX_CONFDIR)/sipxsqa-config.cf-before-edit",
+      										 "sipxsqa");
+
+  commands:
+    (!sipxsqa|stop_sipxecs).sipxsqa_running::
+      "$(sipx.SIPX_SERVICEDIR)/sipxsqa"
+        comment => "stop sipxsqa",
+        args => "stop";
+
+    sipxsqa.!sipxsqa_running.!stop_sipxecs::
+      "$(sipx.SIPX_SERVICEDIR)/sipxsqa"
+        comment => "start sipxsqa",
+        args => "start";
+
+    sipxsqa.sipxsqa_running.(restart_sipxsqa|restart_sipxecs)::
+      "$(sipx.SIPX_SERVICEDIR)/sipxsqa"
+        comment => "restart sipxsqa",
+        args => "asyncrestart";
+        
+    sipxproxy.sipxsqa.restart_sipxsqa::
+      "$(sipx.SIPX_SERVICEDIR)/sipxproxy"
+        comment => "restart sipxproxy",
+        args => "restart";
+    
+    sipxopenfire.sipxsqa.restart_sipxsqa::
+      "/etc/init.d/openfire"
+        comment => "restart openfire",
+        args => "restart";
+        
+    (homer_capture|homer_web).sipxsqa.restart_sipxsqa::  
+      "$(sipx.SIPX_SERVICEDIR)/sipxhomer"
+        comment => "restart sipxhomer",
+        args => "restart";
+        
+    sipxsss.sipxsqa.restart_sipxsqa::
+      "$(sipx.SIPX_SERVICEDIR)/sipxsss"
+        comment => "restart sipxsss",
+        args => "restart";
+        
+    sipxrls.sipxsqa.restart_sipxsqa::
+      "$(sipx.SIPX_SERVICEDIR)/sipxrls"
+        comment => "restart sipxrls",
+        args => "restart";
+                
+    sipxsqa.sipxsqa_running.refresh_sipxsqa::
+      "/usr/bin/killall"
+        comment => "refresh sipxsqa",
+        args => "-HUP sipxsqa";
+}
+

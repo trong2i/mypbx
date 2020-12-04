@@ -1,0 +1,109 @@
+cfg_PKGS = \
+	sipxconfig-neoconf \
+	sipxcommons \
+	velocity \
+	commons-lang \
+	commons-io \
+	dom4j \
+	spring-beans \
+	spring-core \
+	org.springframework.transaction \
+	xercesImpl \
+	sipxconfig-neoconf \
+	sipxconfig-web \
+	tapestry-annotations \
+	tapestry-framework \
+	hivemind \
+	log4j
+
+plugin_JAR_PKGS = \
+	com.noelios.restlet \
+	commons-beanutils \
+	commons-collections \
+	commons-digester \
+	commons-io \
+	dnsjava \
+	dom4j \
+	jain-sip-sdp \
+	log4j \
+	mongo \
+	org.restlet \
+	sipxcommons \
+	not-yet-commons-ssl \
+	ws-commons-util \
+	xmlrpc-client \
+	xmlrpc-server \
+	postgresql \
+	sipxsqaclient
+
+plugin_JAR_RT_PKGS = \
+	com.noelios.restlet \
+	org.restlet
+
+# NOTE: this list of dependencies affects compile and runtime becasue it 
+# is copied into startup script so just be aware what you're affecting.
+plugin_PKGS = \
+	$(plugin_JAR_PKGS) \
+	ant \
+	ant-launcher \
+	thumbnailator \
+	xmlrpc-common \
+	spring-data-mongodb \
+	commons-digester \
+	commons-logging \
+	commons-beanutils-core \
+	spring-context \
+	spring-data-commons \
+	org.springframework.transaction \
+	spring-core \
+	spring-beans \
+	spring-expression
+
+provider_PKGS = \
+	sipxcommons \
+	ws-commons-util \
+	xmlrpc-client \
+	xmlrpc-server \
+	log4j \
+	commons-io \
+	commons-digester
+	
+synchserver_PKGS = \
+	sipxcommons \
+	ws-commons-util \
+	xmlrpc-client \
+	xmlrpc-server \
+	log4j \
+	commons-digester	
+
+provider_PKGS_RT = \
+	$(provider_PKGS) \
+	xmlrpc-server \
+	commons-collections \
+	commons-beanutils-core \
+	commons-io \
+	mongo \
+	xmlrpc-common \
+	dnsjava \
+	dom4j \
+	not-yet-commons-ssl \
+	spring-context \
+	spring-context-support \
+	org.springframework.transaction \
+	spring-core \
+	spring-beans \
+	spring-expression \
+	spring-data-commons \
+	spring-data-mongodb \
+	thumbnailator \
+	jain-sip-sdp \
+	jradius-core \
+	jradius-dictionary \
+	commons-pool \
+	gnu-crypto
+
+sipxvcard_JAVAROOT = $(abspath $(top_builddir)/vcard-provider/classes)
+vcardsynchserver_JAVAROOT = $(abspath $(top_builddir)/vcard-synchserver)
+
+mongolib_JAVAROOT = $(abspath $(top_builddir)/mongo-lib/classes)
+mongosync_JAVAROOT = $(abspath $(top_builddir)/mongo-sync-plugin)

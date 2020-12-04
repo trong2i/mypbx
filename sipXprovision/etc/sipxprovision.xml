@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE model
+    PUBLIC "-//SIPFoundry//sipXconfig//Model specification 2.0//EN"
+    "http://www.sipfoundry.org/sipXconfig/dtd/setting_2_0.dtd">
+<model>
+  <type id="loglevel">
+    <enum>
+      <option>
+        <value>DEBUG</value>
+      </option>
+      <option>
+        <value>INFO</value>
+      </option>
+      <option>
+        <value>NOTICE</value>
+      </option>
+      <option>
+        <value>WARNING</value>
+      </option>
+      <option>
+        <value>ERR</value>
+      </option>
+      <option>
+        <value>CRIT</value>
+      </option>
+      <option>
+        <value>ALERT</value>
+      </option>
+      <option>
+        <value>EMERG</value>
+      </option>
+    </enum>
+  </type>
+  <type id="poly">
+    <enum>
+      <option>
+        <value>3.2.X</value>
+      </option>
+      <option>
+        <value>4.0.X</value>
+      </option>
+      <option>
+        <value>4.1.X</value>
+      </option>
+      <option>
+        <value>4.1.0</value>
+      </option>
+      <option>
+        <value>4.1.2</value>
+      </option>
+      <option>
+        <value>4.1.3</value>
+      </option>
+      <option>
+        <value>4.1.4</value>
+      </option>
+      <option>
+        <value>4.1.5</value>
+      </option>
+      <option>
+        <value>4.1.6</value>
+      </option>
+      <option>
+        <value>4.1.7</value>
+      </option>
+      <option>
+        <value>4.1.8</value>
+      </option>
+      <option>
+        <value>5.0.0</value>
+      </option>
+      <option>
+        <value>5.0.1</value>
+      </option>
+      <option>
+        <value>5.0.2</value>
+      </option>
+      <option>
+        <value>5.1.1</value>
+      </option>
+      <option>
+        <value>5.1.2</value>
+      </option>
+      <option>
+        <value>5.1.3</value>
+      </option>
+      <option>
+        <value>5.2.0</value>
+      </option>
+    </enum>
+  </type>
+  <group name="provision-config">
+    <setting name="log.level">
+      <type refid="loglevel" />
+      <value>NOTICE</value>
+    </setting>
+    <setting name="provision.servlet.port">
+      <type>
+        <integer min="1025" max="65335" />
+      </type>
+      <value>8185</value>
+    </setting>    
+    <setting name="provision.servlet.useSecure">
+     <type>
+		<boolean>
+			<true>
+				<value>true</value>
+			</true>
+			<false>
+				<value>false</value>
+			</false>
+		</boolean>
+		</type>
+      <value>false</value>
+    </setting>
+    <setting name="provision.servlet.securePort">
+      <type>
+        <integer min="1025" max="65335" />
+      </type>
+      <value>8186</value>
+    </setting>
+    <setting name="provision.username" hidden="yes">
+      <type><string/></type>
+    </setting>
+    <setting name="provision.password" hidden="yes">
+      <type><string password="yes"/></type>
+    </setting>
+    <setting name="provision.configUrl" hidden="yes">
+      <type><string/></type>
+    </setting>
+    <setting name="polycom.default">
+      <type refid="poly" />
+      <value>4.0.X</value>
+    </setting>
+  </group>
+</model>

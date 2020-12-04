@@ -1,0 +1,75 @@
+Name: @PACKAGE@
+Version: @VERSION@
+Release: @PACKAGE_REVISION@
+
+Summary: Openfire plugins for  sipX
+License: LGPL
+Group:    Productivity/Telephony/SIP/Servers
+Vendor: SIPfoundry
+Packager: SIPfoundry <sipx-dev@sipfoundry.org>
+Url: http://www.sipfoundry.org/sipXopenfire
+
+BuildRequires: java-1.7.0-openjdk-devel
+BuildRequires: automake
+BuildRequires: zip
+BuildRequires: sipxcommserverlib >= %version
+BuildRequires: sipxcommons >= %version
+BuildRequires: sipxconfig >= %version
+BuildRequires: openfire >= 3.8.1
+BuildRequires: sipxsqa
+
+Source: %name-%version.tar.gz
+
+Requires: sipxcommserverlib >= %version
+Requires: sipxcommons >= %version
+Requires: openfire >= 3.8.1
+Requires: sipxsqa >= %version
+
+# old openfire package in 4.4, this allows 4.6 systems
+# to unininstall it and openfire to install instead
+Obsoletes: sipx-openfire
+
+Prefix: %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+Openfire plugins for sipx.
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make all
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,sipx,sipx,755)
+%attr(755,root,root) %{_libexecdir}/sipXecs/openfire-config
+%attr(755,root,root) %{_libexecdir}/sipXecs/openfire-config-functions
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxopenfire.cf
+%{_datadir}/sipxecs/cfinputs/plugin.d/lib/*.cf
+%{_sysconfdir}/sipxpbx/database/sipxopenfire-initdb.sql
+%dir %attr(775,sipx,sipx) %{_sysconfdir}/sipxpbx/openfire
+%{_sysconfdir}/sipxpbx/sipxopenfire-database.xml
+%config(noreplace) %{_sysconfdir}/sipxpbx/openfire/openfire.xml
+%config(noreplace) %{_sysconfdir}/sipxpbx/openfire/openfire-settings.xml
+%config(noreplace) %{_sysconfdir}/sipxpbx/openfire/openfire-settings.properties
+%config(noreplace) %{_sysconfdir}/sipxpbx/openfire/sipxopenfire.vm
+%config(noreplace) %{_sysconfdir}/sipxpbx/openfire/sipxopenfire-prompts.properties
+%attr(755,sipx,sipx) %{_datadir}/java/sipXecs/sipXopenfire
+%{_datadir}/java/sipXecs/sipXopenfire/plugins/*
+%{_datadir}/java/sipXecs/sipXcommons/sipx-openfire-plugin.jar
+%{_datadir}/java/sipXecs/sipXopenfire/conf/web.xml.enable_openfire_admin_console
+%{_datadir}/java/sipXecs/sipXopenfire/conf/web.xml.disable_openfire_admin_console
+%{_datadir}/java/sipXecs/sipXopenfire/lib/*.jar
+%{_datadir}/java/sipXecs/sipXconfig/plugins/openfire-cfg-service.jar
+%dir %attr(755,sipx,sipx) %{_localstatedir}/sipxdata/cfdata
+%{_localstatedir}/sipxdata/cfdata/defaults/sipxopenfire.cfdat

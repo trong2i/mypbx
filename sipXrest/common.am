@@ -1,0 +1,22 @@
+rest_PKGS = \
+	com.noelios.restlet \
+	com.noelios.restlet.ext.servlet \
+	commons-beanutils \
+	commons-codec \
+	commons-collections \
+	commons-digester \
+	commons-io \
+	commons-lang \
+	commons-logging \
+	dnsjava \
+	jain-sip-sdp \
+	javax.servlet \
+	jetty \
+	log4j \
+	mongo \
+	org.restlet \
+	sipxcommons \
+	ws-commons-util \
+	xmlrpc-client \
+	postgresql \
+	xmlrpc-server

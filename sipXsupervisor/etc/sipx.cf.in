@@ -1,0 +1,563 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+#
+# Main library and core entry point of cfengine agent scripts.
+#
+
+# helpful cfengine cheatsheet
+#
+# Natural order of promises inside a bundle
+#  vars
+#  classes
+#  outputs
+#  interfaces
+#  files
+#  packages
+#  environments
+#  methods
+#  processes
+#  services
+#  commands
+#  storage
+#  databases
+#  reports
+
+#
+# common variables in $(sipx.*) space that isn't in a *.cfdat file
+#
+# NOTE: Cannot use $(sipx. in this bundle because it's not loaded yet. Instead
+# use @SIPX.
+#
+bundle common sipx {
+  vars:
+    any::
+      "location_id" string => readfile("@SIPX_CFDATA@/defaults/location_id", "100");
+      "iface"
+        string => "$(sys.interface)",
+        policy => "overridable";
+      "bind_ip"
+        string => "$(sys.ipv4)",
+        policy => "overridable";
+      "systemctl" 
+        string => "/bin/systemctl",
+        policy => "overridable";
+      "crontabs"
+        string => "/var/spool/cron",
+        policy => "overridable";
+      "adduser"
+        string => "/usr/sbin/adduser",
+        policy => "overridable";
+      "nologin"
+        string => "/sbin/nologin",
+        policy => "overridable";
+      "lock" string => "@SIPX_RUNDIR@/sipxagent.lock";
+
+    SuSE::
+      "crontabs" string => "/var/spool/cron/tabs";
+      "adduser" string => "/usr/sbin/useradd";
+      "nologin" string => "/bin/false";
+
+    debian|ubuntu::
+      "crontabs" string => "/var/spool/crontabs";      
+
+  classes:
+    any::
+      # source based installs do not fully integrate. For example, they typically 
+      # don't run chkconfig, they don't install crontabs, they don't create unix users.
+      #
+      # comparing where the service directory is seems like a solid test if src based install
+      "src" not => strcmp("@SIPX_SERVICEDIR@", "/etc/init.d");
+
+      # established assumption
+      "primary" expression => strcmp("$(location_id)", "1");
+
+    fedora::
+      "fedora16_or_greater" expression => "fedora_16|fedora_17|fedora_18|fedora_19|fedora_20";
+}
+
+# add a crontab. Will automaticall reload crontab service
+bundle agent add_crontab(regex,user,line) {
+  files:
+    any::
+      "$(sipx.crontabs)/$(user)"
+        handle => "add_cron",
+        create => "true",
+        comment => "add cron $(this.promiser) - $(line)",
+        # backup gets processed by crond
+        edit_defaults => no_backup,
+        edit_line => add_crontab_line("$(regex)","$(line)"),
+        classes => if_repaired("reload_crontab");
+      
+  processes:
+    reload_crontab::
+      "crond" 
+        comment => "reload cron",
+        signals => { "hup" };
+}
+
+# remove a crontab. Will automaticall reload crontab service
+bundle agent remove_crontab(regex,user) {
+  vars:
+    any::
+      "cronfile" string => "$(sipx.crontabs)/$(user)";
+
+  classes:
+    any::
+      "has_crontab" expression => fileexists("$(cronfile)");
+
+  files:
+    has_crontab::
+      "$(cronfile)"
+        edit_line => remove_crontab_line("$(regex)"),
+        # backup gets processed by crond
+        edit_defaults => no_backup,
+        classes => if_repaired("reload_crontab");
+      
+  processes:
+    reload_crontab::
+      "cron" signals => { "hup" };
+  
+}
+
+bundle edit_line remove_crontab_line(regex) {
+  delete_lines:
+    "$(regex)";
+}
+
+bundle edit_line add_crontab_line(regex,value) {
+  insert_lines:
+    "$(value)";
+  delete_lines:
+    "$(regex)";
+}
+
+bundle agent sipx_module {
+  commands:
+    any::
+      "@SIPX_CFMODULES@/sipx"
+        args => "$(sipx.location_id)",
+        module => "true";
+}
+
+body copy_from master_files(server,dir) {
+  servers => { "$(server)" };
+  source => "$(dir)";
+  trustkey => "true";
+  compare => "digest";
+  copy_backup => "false";
+}
+
+body copy_from file_remote_cp(from,server) {
+  servers  => { "$(server)" };
+  source   => "$(from)";
+  compare  => "mtime";
+}
+
+bundle agent sipx_init {
+  vars:
+
+  methods:
+    !primary::
+      "update" usebundle => "master_vars";
+      "update" usebundle => "update_from_master";
+
+  files:
+    "$(sipx.lock)"
+       delete => nodir,
+       pathtype => "literal";
+
+  commands:
+    "/usr/bin/lockfile"
+      args => "$(sipx.lock)";
+}
+
+bundle agent sipx_done {
+  # cannot use normal "files: delete => ..." because cfengine will not
+  # execute the same promise twice
+  commands:
+    "/bin/rm"
+       args => "$(sipx.lock)";
+}
+
+body edit_defaults no_backup {
+  edit_backup => "false";
+}
+
+body delete nodir {
+  rmdirs => "false";
+}
+
+bundle agent master_vars {
+  vars:
+    !primary::
+      "dim_master" int => readstringarray("master", "@SIPX_CFDATA@/defaults/master", "#[^\n]*", "=", 10, 4000);
+      "server" string => "$(master[address][1])";
+}
+
+bundle agent update_from_master {
+  # here we go to "great lengths" to avoid using $(sipx. variables and classes 
+  # because we have not pulled down a fresh copy of cfdata yet and they could change.
+  # location_id is safe because it's loaded differently and not allowed to change
+  vars:
+    !primary::
+      "dim_master" int => readstringarray("master","@SIPX_CFDATA@/defaults/master", "#[^\n]*", "=", 10, 4000);
+      "server" string => "$(master[address][1])";
+
+  files:
+    !primary::
+      # root own files only as extra measure against tampering, but not strict requirement
+      "@SIPX_CFDATA@"
+        handle => "update_global",
+        copy_from => master_files("$(server)","$(master[SIPX_CFDATA][1])"),
+        depth_search => recurse("1"),
+        perms => m("644"),
+        classes => if_notkept("fatal_error");
+
+      "@SIPX_CFDATA@/$(sipx.location_id)"
+        handle => "update_location",
+        copy_from => master_files("$(server)","$(master[SIPX_CFDATA][1])/$(sipx.location_id)"),
+        depth_search => recurse("inf"),
+        perms => m("644"),
+        classes => if_notkept("fatal_error");
+
+  reports:
+    !primary::
+      "Replication from $(server)";
+}
+
+
+#
+# Normal delete single file operation. Doesn't remove containing directory if it's empty
+# as some delete commands can do.
+#
+#  files:
+#    "some/file"
+#       delete => nodir;
+#
+body delete unlink {
+  rmdirs => "false";
+}
+
+#
+# To run a command as the sipxpbxuser
+#
+# Example:
+#  commands:
+#    "/bin/mycommand"
+#      contain => su_sipxpbxuser();
+#
+body contain su(user) {
+  exec_owner => "$(user)";
+}
+
+# Copy a local file from cfdata area to final destination if it's changed
+# Often you want to include the location id 
+# Example:
+#  copy_from => copy_from_cfdata("$(sipx.location_id)/myfile"),
+#
+# 
+body copy_from copy_from_cfdata(filename) {
+  source => "$(sipx.SIPX_CFDATA)/$(filename)";
+  compare => "digest";
+}
+
+body copy_from copy_from_cfdatadir {
+  source => "$(sipx.SIPX_CFDATA)";
+  compare => "digest";
+}
+
+#
+# Registers or deregisters a service into start with system on startup
+#
+bundle agent rh_chkconfig_status(s){
+  classes:
+    "${s}_enabled" expression => returnszero("/sbin/chkconfig ${s}", "noshell");
+
+  reports:
+    all::
+      "${g.pf} Service ${s} is enabled",
+        ifvarclass => "${s}_enabled";
+
+      "${g.pk} Service ${s} is not enabled",
+        ifvarclass => "!${s}_enabled";
+}
+
+#
+# Replace the entire contents of a file with a given set of contents
+#
+# Example:
+#  edit_line => replace_contents("file contents here").
+#
+bundle edit_line replace_contents(contents) {
+   insert_lines:
+     "$(contents)";
+
+   delete_lines:
+      ".*";
+}
+
+# 
+# Edit select properties of a configuration file that is colon delimited
+# Example:
+#  var:
+#    "x[foo]" string => "bar";
+#    "x[goo]" string => "gar";
+# ...
+#  file:
+#   "myfile"
+#     edit_line => set_variable_colon_values("x");
+#
+# Results of myfile contents:
+#  a=b
+#  foo=bar
+#  goo=gar
+#  c=d
+#
+bundle edit_line set_variable_colon_values(v) {
+vars:
+  "index" slist => getindices("$(v)");
+  "cindex[$(index)]" string => canonify("$(index)");
+
+field_edits:
+  "\s*$(index)\s*:.*"
+     edit_field => col(":", "2", "$($(v)[$(index)])", "set"),
+        classes => if_ok("$(cindex[$(index)])_in_file"),
+        comment => "Match a line starting like key = something";
+
+insert_lines:
+  "$(index) : $($(v)[$(index)])",
+         comment => "Insert a variable definition",
+      ifvarclass => "!$(cindex[$(index)])_in_file";
+}
+
+
+# 
+# Used to find a running service by looking in process table for command name.
+# NOTE: When looking for processes started by an init.d script, you'll need
+# to specify the path to the binary because that usually what is listed in the
+# process table, not the init.d wrapper script.
+# 
+# Example:
+#
+#  methods:
+#    any::
+#      "any" usebundle => find_sipxservice_by_command("/full/path/myservice","myservice_running");
+#
+#  commands:
+#    myservice_running.!supposed_to_be_running::
+#      "/full/path/myservice_stop";
+#
+#    !myservice_running.supposed_to_be_running::
+#      "/full/path/myservice_start";
+#
+bundle agent find_sipxservice_by_command(command,on_find_define) {
+  processes:
+    "$(command)"
+      process_count => on_process_count("$(on_find_define)"),
+      process_select => user_process_select("$(command).*","$(sipx.SIPXPBXUSER)");
+}
+
+# find a service, but specify the user the command should be running as
+bundle agent find_service_by_command(command,on_find_define,user_id) {
+  processes:
+    "$(command)"
+      process_count => on_process_count("$(on_find_define)"),
+      process_select => user_process_select("$(command).*","$(user_id)");
+}
+
+#
+# Be careful, cfengine truncates command line after X characters. Best to find
+# good identifier early in the command string
+#
+body process_select user_process_select(command_regex,user_id) {
+  command => "$(command_regex)";
+  process_owner => { "$(user_id)" };
+  process_result => "command.process_owner";
+}
+
+bundle agent find_sipxservice_by_command_regex(command_regex,on_find_define) {
+  processes:
+    "$(command_regex)"
+      process_count => on_process_count("$(on_find_define)"),
+      process_select => user_process_select("$(command_regex)","$(sipx.SIPXPBXUSER)");
+}
+
+body process_count on_process_count(on_find_define) {
+  match_range => "0,0";
+  out_of_range_define => { "$(on_find_define)" };
+}
+
+#
+# Normal process select is by regex in process list, so here's help selecting a 
+# process by pid file.
+#
+# TODO: find a way to call more convieniently
+#   - not require pidfile to exists
+#   - not to have to call readfile to translate pidfile to pid in caller
+#
+# Example:
+#
+#  processes:
+#     my_process_should_be_running:
+#       "anyname_you_want"
+#          process_select => by_pid(readfile("$(my_pidfile)", "100")),
+#          restart_class => "start_my_process";
+#
+body process_select by_pid(pid) {
+  pid => irange("$(pid)", "$(pid)");
+  process_result => "pid";
+}
+
+#
+# When you want to trigger an action when a file has changed. Be 
+# careful however. This can be a bit limiting because admin will 
+# have no way to force action if for some reason it's broken because
+# trigger files that's being watch may not change. A trick is to put
+# something in the file like a serial number or a date so file
+# changes from sipxconfig when OK or Apply is hit or send profiles
+# is run.  See DNS and Firewall code for examples.
+# 
+# Example
+#
+#   files:
+#      "$(sipx.SIPX_CFDATA)/$(sipx.location_id)/some-file"
+#        comment => "check for updates to $(this.promiser)",
+#        changes => repair_on_change,
+#        classes => if_repaired("do_something"),
+#        action => fix;
+#
+#   commands:
+#      do_something::
+#         "/some/command";
+#
+#
+body changes repair_on_change {
+  hash           => "best";
+  report_changes => "content";
+  update_hashes  => "yes";
+}
+
+# Part of above
+body action fix {
+  action_policy => "fix";
+}
+
+
+# Verify that a system user exists and ensure home directory
+# is set properly if they do already exist
+#
+# Example
+#  methods:
+#    "any" usebundle => verify_system_user("foo","733t","/var/lib/foo")
+#
+bundle agent verify_system_user(user,password,home) {
+  classes:
+    any::
+      "has_user" expression => userexists("$(user)");
+
+  files:
+    has_user::
+      "/etc/passwd"
+        create => "false",
+        edit_line => set_user_field("$(user)","6","$(home)"); # 6 is home dir
+
+  commands:
+    !has_user::
+      "$(sipx.adduser)",
+        comment => "Creating user $(user)",
+        contain => in_shell,
+        args => "-d $(home) -s /sbin/nologin -M $(user) && \
+          echo -e '$(password)' | /usr/bin/passwd --stdin $(user)";
+}
+
+#
+# Useful to do something on a failed command only. For example report and error
+#
+body classes on_failed_command(fail_codes, define_on_fail) {
+  failed_returncodes => { "$(fail_codes)" };
+  repair_failed => { "$(define_on_fail)" };
+}
+
+# Long performing commands should specify longest possible timeout
+# before cfengine can assume command is hung
+# Example:
+#   commands:
+#     "/bin/very-long-command-that-could-take-two-minutes"
+#       contain => timeout(120);
+#
+body contain timeout(sec) {
+  exec_timeout => "$(sec)";
+}
+
+#
+# Allows 'sipx' user to run a specific command on host running this promise.
+# Generally accompanied by an allow_ssh_command.
+#
+# Security notes:
+#    - Do not use full path to as PATH is controlled by sipx-allowed-commands wrapper script.
+#    - Commands should not come from variables from meta data in 
+#      SIPX_CFDATA directory because then sipx user on primary server can configure 
+#      what commands they are allowed access to and defeats purpose of restricting
+#      list. 
+#    - Be conscience of what commands you give access to, obviously acccess to
+#      run commands like scp would be not good.  It's better to create a wrapper script
+#      that is installed w/the service that is allowed here.
+#    - You do not specify arguments, so commands should take care to sanitize parameters
+#
+# Example:
+#   methods:
+#     myservice::
+#       "any" usebundle => allow_ssh_command("myservice-cool-command");
+#     !myservice::
+#       "any" usebundle => disallow_ssh_command("myservice-cool-command");
+#
+bundle agent allow_ssh_command(command) {
+  files:
+    any::
+      "/root/.ssh/authorized_sipx_commands"
+        create => "true",
+        perms => mog("600", "root", "root"),
+        edit_line => insert_lines("$(command)");
+}
+
+#
+# Removes ability for 'sipx' user to run a specific command on host running this promise.
+# See allow_ssh_command for more info
+#
+bundle agent disallow_ssh_command(command) {
+  files:
+    any::
+      "/root/.ssh/authorized_sipx_commands"
+        create => "false",
+        perms => mog("600", "root", "root"),
+        edit_line => delete_lines_matching("^$(command)$");
+}
+
+#
+# Checks whether the change to the properties file requires a service restart or just refresh.
+# (ex. if only the LOG_LEVEL changed, decide that only a refresh is in order)
+#
+bundle common refresh_sip_service(regex, file, filebefore, service_name) {
+	vars:
+      any::
+        "props_list" slist => readstringlist("$(file)", "$(regex)", "(\n|\r|\r\n)", 99999999999, 9999999999);
+        "propsbefore_list" slist => readstringlist("$(filebefore)", "$(regex)", "(\n|\r|\r\n)", 99999999999, 9999999999);
+		"props" string => join("","props_list");
+		"propsbefore" string => join("","propsbefore_list");
+          
+    classes:
+      any::
+	  	"refresh_$(service_name)" and => {strcmp("$(props)","$(propsbefore)")};
+	  	"restart_$(service_name)" not => "refresh_$(service_name)";
+}

@@ -1,0 +1,66 @@
+#!BuildIgnore: post-build-checks
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  SIP Presence Server
+License:  Pingtel Commercial License
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url:      http://www.pingtel.com
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: openssl-devel
+BuildRequires: sipxportlib-devel >= %version
+BuildRequires: sipxtacklib-devel >= %version
+BuildRequires: sipxcalllib-devel >= %version
+BuildRequires: sipxmediaadapterlib-devel >= %version
+BuildRequires: sipxmedialib-devel >= %version
+BuildRequires: sipxcommserverlib-devel  >= %version
+
+Source:   %name-%version.tar.gz
+
+Requires: sipxcalllib >= %version
+Requires: sipxcommserverlib >= %version
+Obsoletes: %{name}-devel
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+TBD
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%prep
+%setup -q
+
+%build
+%configure --enable-rpmbuild @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxpresence
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxpresence.cf
+%config(noreplace) %attr(755,sipx,sipx) %{_localstatedir}/sipxdata/sipxpresence
+%attr(755,root,root) %{_bindir}/sipxpresence
+%attr(755,root,root) %{_datadir}/sipxecs/schema/presence-state.xsd
+
+%pre
+
+%post

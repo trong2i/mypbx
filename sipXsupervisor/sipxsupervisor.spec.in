@@ -1,0 +1,114 @@
+#!BuildIgnore: post-build-checks
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  sipXecs process supervisor
+License:  Pingtel Commercial License
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   Pingtel Corp.
+Packager: Pingtel <support@pingtel.com>
+Url:      http://www.pingtel.com
+
+BuildRequires: automake
+
+Source:   %name-%version.tar.gz
+Obsoletes: %name-devel
+
+Requires: cfengine >= 3.2.3
+%if %{_vendor} == redhat
+Requires: chkconfig
+%endif
+%if %{_vendor} == suse
+Requires: net-snmp >= 5.3.1
+BuildRequires: net-snmp-devel >= 5.3.1
+%else
+BuildRequires: net-snmp-devel >= 5.3.1
+Requires: net-snmp-libs >= 5.3.1
+%endif
+%if 0%{?fedora} <= 15 || 0%{?rhel} <= 6
+Requires: system-config-network-tui
+%else
+Requires: system-config-network
+%endif
+# log watcher
+Requires: sec
+Requires: sendmail
+Requires: sendmail-cf
+Requires: ntp
+Requires: make
+# backup to sftp
+Requires: rubygem-net-sftp
+# iptables
+Requires: policycoreutils
+# fail2ban
+Requires: fail2ban
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+This component manages sipXecs processes and acts as the configuration agent
+for a remote management application.
+
+Uses cfengine to securely distribute configuration. cfengine is a
+distributed configuration system.  The fact cfengine is used in this
+project should not interfere with any configuration systems an IT
+infrastruture might already have like puppet, chef or even cfengine.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%prep
+%setup -q
+
+%build
+%configure --enable-rpmbuild @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%pre
+# NOTE: Duplicate copy of user/group add in sipXcommons
+if ! /usr/bin/id -g sipx >/dev/null 2>&1; then
+  /usr/sbin/groupadd -r sipx
+fi
+
+if ! /usr/bin/id sipx >/dev/null 2>&1; then
+  # hack: use "-s /bin/bash", some scripts need to be fixed to not require that
+  /usr/sbin/useradd -M -r -g sipx -d %{_sysconfdir}/sipxpbx -s /bin/bash -c sipx sipx 2>&1
+fi
+
+%files
+%defattr(644,root,root,755)
+%doc  README   ChangeLog %name.configlog
+%attr(755,root,root) %{_bindir}/*
+%attr(755,root,root) %{_sysconfdir}/init.d/*
+%attr(755,root,root) %{_sysconfdir}/sipxpbx/dhcp/*
+%attr(755,root,root) %{_sysconfdir}/sipxpbx/ntpd/*
+%attr(755,root,root) %{_sysconfdir}/sipxpbx/firewall/*
+%attr(755,root,root) %{_sysconfdir}/sipxpbx/fail2ban/*
+%attr(755,root,root) %{_datadir}/sipxecs/cfmodules/*
+%attr(755,root,root) %{_libexecdir}/sipXecs/*
+%{_datadir}/sipxecs/cfinputs/*.cf
+%{_datadir}/sipxecs/cfinputs/plugin.d/*.cf
+%{_datadir}/sipxecs/cfinputs/plugin.d/lib/*.cf
+# where sipxconfig writes data, sipx user needs r/w access
+%dir %attr(755,sipx,sipx) %{_localstatedir}/sipxdata/cfdata
+# defaults are static, only root should write
+%{_localstatedir}/sipxdata/cfdata/defaults/*
+
+%post
+if grep -q :on <<<`/sbin/chkconfig sipxsupervisor --list 2>&1`; then
+    /sbin/chkconfig sipxsupervisor reset
+fi
+if grep -q :on <<<`/sbin/chkconfig sipxlogwatcher --list 2>&1`; then
+    /sbin/chkconfig sipxlogwatcher reset
+fi

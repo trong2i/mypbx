@@ -1,0 +1,112 @@
+# Copyright (c) 2012 eZuce, Inc. All rights reserved.
+# Contributed to SIPfoundry under a Contributor Agreement
+
+# This software is free software; you can redistribute it and/or modify it under
+# the terms of the Affero General Public License (AGPL) as published by the
+# Free Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This software is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+
+#
+# sipxpublisher configuration and process management
+#
+bundle agent sipxpublisher {
+  methods:
+    sipxpublisher::
+      "any" usebundle => "sipxcommserverlib";
+      "any" usebundle => "sipxpublisher_config";
+    any::
+      "any" usebundle => "sipxpublisher_setup";
+      "any" usebundle => "sipxpublisher_running";
+}
+
+bundle agent sipxpublisher_config {
+  files:
+    any::
+      "$(sipx.SIPX_CONFDIR)/status-config"
+        comment => "install MWI config $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        edit_line => sipstatus_config_contents(),
+        classes => if_repaired("sipxpublisher_properties_changed");
+
+    any::
+      "$(sipx.SIPX_CONFDIR)/status-plugin.xml"
+        comment => "install MWI plugin config $(this.promiser)",
+        create => "true",
+        perms => m("644"),
+        copy_from => copy_from_cfdata("$(sipx.location_id)/status-plugin.xml"),
+        classes => if_repaired("restart_sipxpublisher");
+        
+    any::   
+      "$(sipx.SIPX_CONFDIR)/resource-limits-mwi.ini"
+        comment => "MWI resource limits changed - restart mwi",
+        create => "true",
+        perms => m("644"),
+        copy_from => copy_from_cfdata("$(sipx.location_id)/resource-limits-mwi.ini"),
+        classes => if_repaired("restart_sipxpublisher");         
+}
+
+bundle edit_line sipstatus_config_contents() {
+  insert_lines:
+    any::
+      "$(sipx.SIPX_CFDATA)/$(sipx.location_id)/status-config.part"
+        insert_type => "file";
+      "SIP_STATUS_BIND_IP : $(sys.ipv4)";
+
+  delete_lines:
+    any::
+      ".*";
+}
+
+bundle agent sipxpublisher_setup {
+  methods:
+    !src.sipxpublisher::
+      "any" usebundle => rh_chkconfig_status("sipxpublisher on");
+    !src.!sipxpublisher::
+      "any" usebundle => rh_chkconfig_status("sipxpublisher off");
+}
+
+bundle agent sipxpublisher_running {
+  vars:
+    any::
+      "service_command" string => "$(sipx.SIPX_BINDIR)/sipstatus";
+
+  classes:
+    sipxpublisher.sipxpublisher_properties_changed::
+  	  "restart_sipxpublisher" not => fileexists("$(sipx.SIPX_CONFDIR)/status-config.cf-before-edit");
+					 
+  methods:
+    sipxpublisher.sipxpublisher_properties_changed.!restart_sipxpublisher::
+      "sipxpublisher_properties_changed" usebundle => refresh_sip_service("SIP_STATUS_LOG_LEVEL : (DEBUG|INFO|NOTICE|WARNING|ERR|ERROR|CRIT|ALERT|EMERG)",
+      										 "$(sipx.SIPX_CONFDIR)/status-config",
+      										 "$(sipx.SIPX_CONFDIR)/status-config.cf-before-edit",
+      										 "sipxpublisher");
+    any::
+      "any" usebundle => find_sipxservice_by_command("$(service_command)","sipxpublisher_running");
+
+  commands:
+    (!sipxpublisher|stop_sipxecs).sipxpublisher_running::
+      "$(sipx.SIPX_SERVICEDIR)/sipxpublisher"
+        comment => "stop sipxpublisher",
+        args => "stop";
+
+    sipxpublisher.!sipxpublisher_running.!stop_sipxecs::
+      "$(sipx.SIPX_SERVICEDIR)/sipxpublisher"
+        comment => "start sipxpublisher",
+        args => "start";
+
+    sipxpublisher.sipxpublisher_running.(restart_sipxpublisher|restart_sipxecs)::
+      "$(sipx.SIPX_SERVICEDIR)/sipxpublisher"
+        comment => "restart sipxpublisher",
+        args => "asyncrestart";
+        
+    sipxpublisher.sipxpublisher_running.refresh_sipxpublisher::
+      "/usr/bin/killall"
+        comment => "refresh sipxpublisher",
+        args => "-HUP sipstatus";
+}

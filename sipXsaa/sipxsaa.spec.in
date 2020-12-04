@@ -1,0 +1,77 @@
+Name:     @PACKAGE@
+Version:  @VERSION@
+Release:  @PACKAGE_REVISION@
+
+Summary:  Shared Appearance Agent
+License:  LGPL
+Group:    Productivity/Telephony/SIP/Servers
+Vendor:   SIPfoundry
+Packager: SIPfoundry <sipx-dev@list.sipfoundry.org>
+Url:      http://www.sipfoundry.org/sipXsaa
+
+BuildRequires: automake
+BuildRequires: gcc-c++
+BuildRequires: cppunit-devel
+BuildRequires: pcre-devel >= 4.5
+BuildRequires: openssl-devel
+%if %{_vendor} == suse
+BuildRequires: apache2-devel
+BuildRequires: libapr1-devel
+%else
+BuildRequires: httpd-devel
+BuildRequires: apr-devel
+%endif
+BuildRequires: sipxcalllib-devel >= %version
+BuildRequires: sipxcommserverlib-devel >= %version
+BuildRequires: sipxmediaadapterlib-devel >= %version
+BuildRequires: sipxmedialib-devel >= %version
+BuildRequires: sipxportlib-devel >= %version
+BuildRequires: sipxtacklib-devel >= %version
+
+Source:   %name-%version.tar.gz
+Obsoletes: %name-devel
+
+Requires: sipxcalllib >= %version
+Requires: sipxcommserverlib >= %version
+Requires: chkconfig
+
+Prefix:    %_prefix
+BuildRoot: %{_tmppath}/%name-%version-root
+
+%description
+Manages shared appearances for sipx.
+
+%if %{_vendor} == suse
+%debug_package
+%endif
+
+%prep
+%setup -q
+
+%build
+%configure @SIPX_RPM_CONFIGURE_OPTIONS@
+cp config.log %name.configlog
+make %{_smp_mflags}
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(644,root,root,755)
+%attr(644,root,root) %{_datadir}/sipxecs/schema/appearance-groups.xsd
+%attr(755,root,root) %{_sysconfdir}/init.d/sipxsaa
+%attr(755,root,root) %{_bindir}/sipxsaa
+%{_datadir}/sipxecs/cfinputs/plugin.d/sipxsaa.cf
+%attr(755,root,root) %{_bindir}/sipx-snapshot-saa
+
+%pre
+
+%post
+setcap 'CAP_SYS_RESOURCE=+ep' %{_bindir}/sipxsaa
+if grep -q :on <<<`/sbin/chkconfig sipxsaa --list 2>&1`; then
+    /sbin/chkconfig sipxsaa reset
+fi
